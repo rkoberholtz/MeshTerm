@@ -1673,14 +1673,19 @@ class _ScriptedDevice:
     def __init__(self, acks: list) -> None:
         self._acks = list(acks)
         self.sent: list[str] = []
+        # The timestamp and the try number of each send, in order.
+        self.stamps: list[tuple[int | None, int]] = []
 
     async def connect(self) -> None:  # for _StubContext.device()
         return None
 
-    async def send_direct_message(self, contact: Contact, text: str):
+    async def send_direct_message(
+        self, contact: Contact, text: str, *, timestamp: int | None = None, attempt: int = 0
+    ):
         from meshterm.core.models import Delivery
 
         self.sent.append(text)
+        self.stamps.append((timestamp, attempt))
         ack = self._acks.pop(0) if self._acks else None
         return Delivery(f"{len(self.sent):08x}", ack)
 
@@ -2710,7 +2715,7 @@ class _AckingMeshCore:
             if sub.event_type is EventType.ACK:
                 sub.callback(event)
 
-    async def send_msg(self, pub, text):  # noqa: ANN001, ANN201
+    async def send_msg(self, pub, text, timestamp=None, attempt=0):  # noqa: ANN001, ANN201
         from types import SimpleNamespace
 
         if self._during:

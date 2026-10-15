@@ -735,6 +735,45 @@ def _chat_urls(cols: int, rows: int) -> Screen:
     return ChatScreen(conv, messages, send=None, names={}, session=_GallerySession(cols, rows))
 
 
+def _chat_reactions(cols: int, rows: int) -> Screen:
+    """A selected channel message with reactions: the names of the nodes take the counts' place.
+
+    Five nodes react with three emoji, one of them ours. The selection draws the widest line
+    that reactions make, and it wraps at the indent of the body. On the PicoCalc, emoticons
+    stand in for the emoji that have one.
+    """
+    from datetime import datetime, timezone
+
+    from meshterm.core import reactions
+
+    stamp = 1_760_000_000
+    at = datetime.fromtimestamp(stamp, tz=timezone.utc)
+
+    def react(name: str, emoji: str) -> ChatMessage:
+        body = reactions.channel_text(emoji, "Alice", "bridge on 3rd is open again", stamp)
+        return ChatMessage(text=f"{name}: {body}", is_channel=True, created_at=at)
+
+    conv = Conversation(label="Lakeside emergency", is_channel=True, channel_idx=2)
+    messages = [
+        ChatMessage(text="Alice: bridge on 3rd is open again", is_channel=True, created_at=at),
+        react("Hilltop-Repeater", "👍"),
+        react("Bob", "👍"),
+        react("Carol-Mobile", "❤️"),
+        react("Dave", "🔥"),
+        ChatMessage(
+            text=reactions.channel_text("👍", "Alice", "bridge on 3rd is open again", stamp),
+            outbound=True,
+            is_channel=True,
+            created_at=at,
+        ),
+    ]
+    screen = ChatScreen(
+        conv, messages, send=None, names={}, session=_GallerySession(cols, rows), self_name="Me"
+    )
+    screen.handle("up")
+    return screen
+
+
 def _chat_long_url(cols: int, rows: int) -> Screen:
     """A picked message with a link that is wider than the body lane.
 
@@ -1738,6 +1777,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("chat", _chat),
     _Entry("chat_channel_scoped", _chat_channel_scoped),
     _Entry("chat_urls", _chat_urls),
+    _Entry("chat_reactions", _chat_reactions),
     _Entry("chat_long_url", _chat_long_url),
     _Entry("chat_picker", _chat_picker),
     _Entry("room", _room),

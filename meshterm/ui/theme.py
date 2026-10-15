@@ -825,6 +825,36 @@ def _glyph_identity(icon: str) -> str:
     return icon
 
 
+#: The emoticons that stand in for the default reactions where the font has no emoji (the
+#: PicoCalc and the Cardputer). Each default reaction is two cells wide, and so is each
+#: emoticon. Thus a badge keeps its width. A reaction that is not here goes through the fold
+#: at the render boundary, as each other emoji does.
+# fmt: off
+_EMOTICONS: dict[str, str] = {
+    "👍": "+1", "👎": "-1", "❤️": "<3", "❤": "<3", "😂": ":D", "😮": ":O", "😢": ":(",
+}
+# fmt: on
+
+
+def emoticon(emoji: str) -> str:
+    """The rendering of a reaction on the platform: the emoji itself, or its emoticon.
+
+    Args:
+        emoji: The emoji of a reaction (one glyph, refer to
+            :func:`~meshterm.core.reactions.is_reaction_emoji`).
+
+    Returns:
+        The emoji on a platform that draws emoji. Else its emoticon from
+        :data:`_EMOTICONS`, or the emoji unchanged when it has none.
+    """
+    return _emoticon_impl(emoji)
+
+
+def _emoticon_compact(emoji: str) -> str:
+    """A platform with no emoji: the emoticon of a reaction, when it has one."""
+    return _EMOTICONS.get(emoji, emoji)
+
+
 def _glyph_compact(icon: str) -> str:
     """The PicoCalc: icons become their single-cell console-font glyph."""
     return _GLYPH_MAP.get(icon, icon)
@@ -1099,6 +1129,7 @@ def snr_style(snr: float | None) -> str:
 _ACTIVE_THEME: Theme = MESH_THEME
 _node_impl: Callable[[str], str] = _node_style_spectrum
 _glyph_impl: Callable[[str], str] = _glyph_identity
+_emoticon_impl: Callable[[str], str] = _glyph_identity
 _fold_impl: Callable[[str], str] = _no_fold
 
 #: The map from a marker colour to RGB. :func:`mark_rgb` fills it, and a platform switch
@@ -1109,11 +1140,12 @@ _STYLE_RGB: dict[str, tuple[int, int, int]] = {}
 @on_platform
 def _bind(platform: Platform) -> None:
     """Bind the choices of the theme that depend on the platform (runs now and at each switch)."""
-    global _ACTIVE_THEME, _node_impl, _glyph_impl, _fold_impl, _FOLD_TABLE
+    global _ACTIVE_THEME, _node_impl, _glyph_impl, _emoticon_impl, _fold_impl, _FOLD_TABLE
     global _FOLD_FONT, _FOLD_ALLOWED, _FOLD_QUANTIZE
     _ACTIVE_THEME = MESH_THEME if platform.truecolor else MESH_THEME_16
     _node_impl = _node_style_spectrum if platform.truecolor else _node_style_quantized
     _glyph_impl = _glyph_identity if platform.emoji else _glyph_compact
+    _emoticon_impl = _glyph_identity if platform.emoji else _emoticon_compact
     font = FONTS.get(platform.font)
     if font is not None:
         _FOLD_FONT = font

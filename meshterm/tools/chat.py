@@ -27,7 +27,7 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from ..context import AppContext
-from ..core import exitcodes
+from ..core import exitcodes, reactions
 from ..core.channels import (
     CHANNEL_SLOT_PROBE_CAP,
     DEFAULT_PUBLIC_SECRET,
@@ -60,7 +60,7 @@ from ..ui.fields import ChannelRef, NodeRef
 from ..ui.menus import Lane, column_header, fit_cells, section_heading
 from ..ui.pathline import SELF_GLYPH, PathHop
 from ..ui.termfont import powerline_enabled
-from ..ui.theme import name_style
+from ..ui.theme import emoticon, name_style
 from ..ui.tui import Choice, DeleteRequest, Separator
 from ..ui.widgets import (
     DESTINATION,
@@ -1047,7 +1047,7 @@ def _preview_text(
     was cut before to approximately the visible lane has nothing more to show. The list
     cuts it at the right edge, the same as any other row, and the scroll goes past that.
     """
-    body_raw = last.text.replace("\n", " ")
+    body_raw = _reaction_line(last) or last.text.replace("\n", " ")
     text = Text()
     if last.outbound:
         _append_author(text, PathHop(SELF_GLYPH, you=True), Text("you: ", style="accent"))
@@ -1069,6 +1069,28 @@ def _preview_text(
     else:
         _append_body(text, body_raw, key_of)
     return text
+
+
+def _reaction_line(last: ChatMessage) -> str | None:
+    """The preview body of a reaction, ``reacted 👍``, or ``None`` for a usual message.
+
+    A reaction is a message on the wire, and it can be the latest message of a
+    conversation. Its raw body (a mention, a newline, and a hash) means nothing to a person.
+    The name of the node keeps its place in front of the body, as for each message.
+    """
+    if last.author is not None:
+        return None  # a room post: rooms have no reactions
+    body = (
+        split_channel_sender(last.text)[1] if last.is_channel and not last.outbound else last.text
+    )
+    reaction = reactions.parse(body.strip(" \t"), channel=last.is_channel)
+    if reaction is None:
+        return None
+    line = f"reacted {emoticon(reaction.emoji)}"
+    if last.is_channel and not last.outbound:
+        name = split_channel_sender(last.text)[0]
+        return f"{name}: {line}" if name else line
+    return line
 
 
 def _append_author(text: Text, hop: PathHop, byline: Text) -> None:

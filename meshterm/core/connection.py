@@ -1557,12 +1557,21 @@ class Device(ABC):
     # -- messaging ---------------------------------------------------------------
 
     @abstractmethod
-    async def send_direct_message(self, contact: Contact, text: str) -> Delivery:
+    async def send_direct_message(
+        self, contact: Contact, text: str, *, timestamp: int | None = None, attempt: int = 0
+    ) -> Delivery:
         """Send a direct text message to a contact, and wait some time for its ack.
 
         Args:
             contact: The recipient. Its ``public_key`` addresses the message.
             text: The message body.
+            timestamp: The timestamp that the message carries, in seconds. ``None`` uses
+                the clock of this computer. The recipient sees this value, and a reaction
+                names the message by it (refer to :mod:`~meshterm.core.reactions`). Thus the
+                caller gives it when it must know the value.
+            attempt: The number of the try (0 to 3). A retry of the same message has the
+                same timestamp and the next number, as the protocol specifies. The number
+                makes the packet of the retry different from the first one.
 
         Returns:
             The :class:`~meshterm.core.models.Delivery`: the ack code that the radio
@@ -1574,12 +1583,16 @@ class Device(ABC):
         """
 
     @abstractmethod
-    async def send_channel_message(self, index: int, text: str) -> None:
+    async def send_channel_message(
+        self, index: int, text: str, *, timestamp: int | None = None
+    ) -> None:
         """Broadcast a text message on a channel slot.
 
         Args:
             index: The zero-based channel slot on which to transmit.
             text: The message body.
+            timestamp: The timestamp that the message carries, in seconds. ``None`` uses
+                the clock of this computer (refer to :meth:`send_direct_message`).
 
         Raises:
             DeviceCommandError: If the companion rejected the send.
@@ -1631,7 +1644,9 @@ class Device(ABC):
                     self._scope_leaked = None
             yield
 
-    async def send_channel_in_scope(self, index: int, text: str, scope: str | None) -> None:
+    async def send_channel_in_scope(
+        self, index: int, text: str, scope: str | None, *, timestamp: int | None = None
+    ) -> None:
         """Broadcast on a channel in a given scope, and leave the session scope as it was.
 
         This is the only way that MeshTerm sends a channel message. ``None`` is the plain
@@ -1659,6 +1674,8 @@ class Device(ABC):
             text: The message body.
             scope: A region name, :data:`~meshterm.core.regions.WILDCARD` for unscoped, or
                 ``None`` for the default of the device.
+            timestamp: The timestamp that the message carries (refer to
+                :meth:`send_channel_message`).
 
         Raises:
             FloodScopeError: If the companion cannot send in ``scope``. Nothing was sent.
@@ -1671,10 +1688,10 @@ class Device(ABC):
             bare = validate_region(bare)
         async with self.transmitting():
             if not bare:
-                await self.send_channel_message(index, text)
+                await self.send_channel_message(index, text, timestamp=timestamp)
                 return
             if bare == REGION_WILDCARD and await self._unscoped_is_plain():
-                await self.send_channel_message(index, text)
+                await self.send_channel_message(index, text, timestamp=timestamp)
                 return
             try:
                 await self.set_flood_scope(bare)
@@ -1682,7 +1699,7 @@ class Device(ABC):
                 raise FloodScopeError(bare, _scope_refusal(bare, exc)) from exc
             self._scope_active = True
             try:
-                await self.send_channel_message(index, text)
+                await self.send_channel_message(index, text, timestamp=timestamp)
             finally:
                 self._scope_active = False
                 try:
@@ -4117,7 +4134,7 @@ class MeshCoreDevice(Device):
         return stop_pump
 
     async def send_direct_message(  # noqa: D102 - inherited docstring
-        self, contact: Contact, text: str
+        self, contact: Contact, text: str, *, timestamp: int | None = None, attempt: int = 0
     ) -> Delivery:
         transmit_gate.mark()
         from meshcore import EventType
@@ -4146,7 +4163,9 @@ class MeshCoreDevice(Device):
         try:
             # Only the hand-over holds the transmit lock. The ack wait below is not a send.
             async with self.transmitting():
-                result = await mc.commands.send_msg(pub, text)
+                result = await mc.commands.send_msg(
+                    pub, text, timestamp=timestamp, attempt=attempt & 3
+                )
             if result is None or getattr(result, "is_error", lambda: False)():
                 # A recipient for which the firmware has no entry is the only rejection with
                 # an obvious repair. Thus it gets its own class, so the chat screen can offer
@@ -4202,11 +4221,11 @@ class MeshCoreDevice(Device):
         return Delivery(code[0], ack, flood)
 
     async def send_channel_message(  # noqa: D102 - inherited docstring
-        self, index: int, text: str
+        self, index: int, text: str, *, timestamp: int | None = None
     ) -> None:
         transmit_gate.mark()
         async with self.transmitting():
-            self._ok(await self._require().commands.send_chan_msg(index, text))
+            self._ok(await self._require().commands.send_chan_msg(index, text, timestamp))
 
     @staticmethod
     def _ok(event):  # type: ignore[no-untyped-def]
@@ -4886,7 +4905,7 @@ class MockDevice(Device):
         self._tx_power = value
 
     async def send_direct_message(  # noqa: D102 - inherited docstring
-        self, contact: Contact, text: str
+        self, contact: Contact, text: str, *, timestamp: int | None = None, attempt: int = 0
     ) -> Ack | None:
         transmit_gate.mark()
         async with self.transmitting():
@@ -4931,7 +4950,7 @@ class MockDevice(Device):
         task.add_done_callback(self._bg_tasks.discard)
 
     async def send_channel_message(  # noqa: D102 - inherited docstring
-        self, index: int, text: str
+        self, index: int, text: str, *, timestamp: int | None = None
     ) -> None:
         transmit_gate.mark()
         async with self.transmitting():

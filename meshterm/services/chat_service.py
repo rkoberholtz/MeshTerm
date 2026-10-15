@@ -19,11 +19,14 @@ MeshTerm always stores them while a device listens.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import OrderedDict
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from ..core.channels import channel_identity
+from ..core import reactions
+from ..core.channels import channel_identity, split_channel_sender
 from ..core.connection import Unsubscribe
 from ..core.events import EventKind, MeshEvent
 from ..core.models import (
@@ -48,6 +51,29 @@ _AWAITING_CAP = 16
 
 #: Called with a message when its ack arrives after the send stopped its wait for the ack.
 LateAck = Callable[[ChatMessage], None]
+
+#: The highest try number that a direct message can carry. The protocol keeps it in two bits.
+_LAST_ATTEMPT = 3
+
+
+def _stamp() -> tuple[int, datetime]:
+    """The timestamp for a message that MeshTerm is about to send, and the same instant as a date.
+
+    MeshTerm gives the timestamp to the device, and does not let the library read the clock
+    a second time. Thus the stored time of the message is exactly the time that the
+    recipients see. A reaction names its target by that time (refer to
+    :mod:`~meshterm.core.reactions`), so the two must agree to the second.
+    """
+    seconds = int(time.time())
+    return seconds, datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+
+def _is_reaction(message: Message) -> bool:
+    """Whether an inbound message is a reaction. A room post never is one (rooms have none)."""
+    if message.is_post:
+        return False
+    body = split_channel_sender(message.text)[1] if message.is_channel else message.text
+    return reactions.parse(body.strip(" \t"), channel=message.is_channel) is not None
 
 
 def _fallback_channel_id(idx: int | None) -> str:
@@ -103,6 +129,9 @@ class ChatService:
         # that wants to know when its ack arrives (refer to :meth:`_settle_ack`).
         self._awaiting: OrderedDict[str, tuple[ChatMessage, LateAck | None]] = OrderedDict()
         self._ack_unsubscribe: Unsubscribe | None = None
+        # The next try number of each direct message that was sent (by its row id). A
+        # retry with ^R sends the same message again: the same timestamp, the next number.
+        self._next_attempt: dict[int, int] = {}
 
     @property
     def active(self) -> bool:
@@ -408,6 +437,9 @@ class ChatService:
           that comes from the slot.
         * A muted channel (refer to :class:`~meshterm.core.mute_store.MuteStore`). This is
           the one suppression that the user asks for, not one that the device implies.
+        * A reaction (refer to :mod:`~meshterm.core.reactions`). The transcript shows it on
+          the message that it reacts to, not as a new message. Thus a badge for it would
+          point at nothing new.
 
         The method asks the device through the session cache. Thus this rule costs nothing
         for each message, more than the channel read that the identity already made.
@@ -422,6 +454,8 @@ class ChatService:
         Returns:
             ``True`` to increase the unread count of the conversation.
         """
+        if _is_reaction(message):
+            return False
         if message.is_channel:
             store = getattr(self._ctx, "mute_store", None)
             if store is not None and store.is_muted(channel_id):
@@ -481,7 +515,9 @@ class ChatService:
                     return is_direct_messageable(contact.node_type)
         return False
 
-    async def _deliver_direct(self, contact: Contact, text: str) -> tuple[bool, list[str]]:
+    async def _deliver_direct(
+        self, contact: Contact, text: str, *, timestamp: int, first_attempt: int = 0
+    ) -> tuple[bool, list[str], int]:
         """Transmit a direct message, and try again softly until it is acknowledged.
 
         One logical send makes one first transmission, plus up to
@@ -496,13 +532,22 @@ class ChatService:
         stores the message as unacknowledged. Then Ctrl-R in the chat screen is the retry
         that the user starts, in addition to these automatic retries.
 
+        Each try carries the same timestamp and the next try number, as the protocol
+        specifies. Thus the recipient sees one message with one timestamp, whichever try
+        arrives. A reaction to it names that timestamp. The try number makes each packet
+        different, so a repeater does not discard a retry as a copy of the first packet. The
+        number stops at 3 (the protocol has two bits for it).
+
         Args:
             contact: The recipient.
             text: The message body.
+            timestamp: The timestamp of the message, the same for each try.
+            first_attempt: The try number of the first transmission.
 
         Returns:
-            Whether an attempt was acknowledged in its wait, and the ack code of each
-            attempt. A late ack can still carry any of these codes (the device keeps them).
+            Whether an attempt was acknowledged in its wait, the ack code of each attempt (a
+            late ack can still carry any of these codes, because the device keeps them),
+            and the try number for the next retry.
 
         Raises:
             Exception: A hard send failure (the companion rejects the send) goes to the
@@ -512,12 +557,16 @@ class ChatService:
         device = await self._ctx.device()
         attempts = max(0, self._ctx.preferences.direct_message_soft_retries) + 1
         codes: list[str] = []
+        number = first_attempt
         for attempt in range(1, attempts + 1):
-            delivery: Delivery = await device.send_direct_message(contact, text)
+            delivery: Delivery = await device.send_direct_message(
+                contact, text, timestamp=timestamp, attempt=min(number, _LAST_ATTEMPT)
+            )
+            number += 1
             if delivery.code:
                 codes.append(delivery.code)
             if delivery.acked:
-                return True, codes
+                return True, codes, number
             if attempt < attempts:
                 self._ctx.log.debug(
                     "chat: DM to %s unacked on try %d/%d; soft-retrying",
@@ -525,7 +574,7 @@ class ChatService:
                     attempt,
                     attempts,
                 )
-        return False, codes
+        return False, codes, number
 
     async def send_direct(
         self, contact: Contact, text: str, *, on_late_ack: LateAck | None = None
@@ -549,7 +598,8 @@ class ChatService:
             The stored outbound :class:`ChatMessage`. Its ``acked`` shows whether a
             delivery acknowledgement arrived in the wait, until now.
         """
-        acked, codes = await self._deliver_direct(contact, text)
+        seconds, sent_at = _stamp()
+        acked, codes, number = await self._deliver_direct(contact, text, timestamp=seconds)
         chat = ChatMessage(
             text=text,
             outbound=True,
@@ -557,10 +607,11 @@ class ChatService:
             peer=contact.key_prefix or contact.public_key[:12] or None,
             peer_name=contact.name,
             acked=acked,
-            created_at=utcnow(),
+            created_at=sent_at,
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
         if not acked:
+            self._next_attempt[chat.row_id] = number
             self._await_ack(chat, codes, on_late_ack)
         return chat
 
@@ -583,7 +634,13 @@ class ChatService:
         Returns:
             The same ``message``, with :attr:`~ChatMessage.acked` updated.
         """
-        acked, codes = await self._deliver_direct(contact, message.text)
+        seconds = int(message.created_at.timestamp())
+        first = self._next_attempt.get(message.row_id, 1) if message.row_id is not None else 1
+        acked, codes, number = await self._deliver_direct(
+            contact, message.text, timestamp=seconds, first_attempt=first
+        )
+        if message.row_id is not None:
+            self._next_attempt[message.row_id] = number
         if message.acked:
             return message  # a late ack for an earlier attempt settled it during this send
         message.acked = acked
@@ -756,7 +813,8 @@ class ChatService:
         device = await self._ctx.device()
         channel_id = await self.channel_id_for(index)
         asked = scope if scope is not None else self.channel_scope(channel_id)
-        await device.send_channel_in_scope(index, text, asked)
+        seconds, sent_at = _stamp()
+        await device.send_channel_in_scope(index, text, asked, timestamp=seconds)
         chat = ChatMessage(
             text=text,
             outbound=True,
@@ -764,7 +822,7 @@ class ChatService:
             channel_id=channel_id,
             channel_idx=index,
             peer_name=label,
-            created_at=utcnow(),
+            created_at=sent_at,
             scope=await self._sent_under(asked),
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)

@@ -71,12 +71,14 @@ class _TracingDevice(MockDevice):
         await super().set_flood_scope(region)
         self.trail.append(("scope", key))
 
-    async def send_channel_message(self, index: int, text: str) -> None:
-        await super().send_channel_message(index, text)
+    async def send_channel_message(
+        self, index: int, text: str, *, timestamp: int | None = None
+    ) -> None:
+        await super().send_channel_message(index, text, timestamp=timestamp)
         self.trail.append(("channel", text, self._send_scope))
 
-    async def send_direct_message(self, contact, text):  # noqa: ANN001, ANN201
-        ack = await super().send_direct_message(contact, text)
+    async def send_direct_message(self, contact, text, **sent):  # noqa: ANN001, ANN003, ANN201
+        ack = await super().send_direct_message(contact, text, **sent)
         self.trail.append(("dm", text, self._send_scope))
         return ack
 
@@ -148,10 +150,10 @@ async def test_a_dm_cannot_interleave_into_the_window() -> None:
     release = asyncio.Event()
     original = device.send_channel_message
 
-    async def slow_send(index: int, text: str) -> None:
+    async def slow_send(index: int, text: str, **sent) -> None:  # noqa: ANN003
         entered.set()
         await release.wait()
-        await original(index, text)
+        await original(index, text, **sent)
 
     device.send_channel_message = slow_send  # type: ignore[method-assign]
     scoped = asyncio.ensure_future(device.send_channel_in_scope(0, "scoped", "lakeside"))
@@ -186,7 +188,7 @@ async def test_a_send_that_fails_still_restores_the_scope() -> None:
     """If the channel send raises an error, the session scope must not stay on its region."""
     device = _TracingDevice()
 
-    async def boom(index: int, text: str) -> None:
+    async def boom(index: int, text: str, **sent) -> None:  # noqa: ANN003
         raise DeviceCommandError("rejected")
 
     device.send_channel_message = boom  # type: ignore[method-assign]

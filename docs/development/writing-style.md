@@ -194,6 +194,7 @@ and in quoted text.
 | packet | One radio transmission | frame (for radio data) |
 | protocol frame | One unit of the companion protocol on USB, Bluetooth, or TCP: a command, a reply, or a push from the companion. In code that handles only this protocol, "frame" alone is permitted | packet (for this) |
 | message | A text message, direct or on a channel | |
+| reaction | An emoji that a node sends to answer one message. It is a message on the wire, and the chat shows it under the message that it names | |
 | send | MeshTerm gives a message, a packet, or a command to the device | emit |
 | transmit | A radio puts a packet on the air | |
 | broadcast | Transmit to all nodes, with no destination | |

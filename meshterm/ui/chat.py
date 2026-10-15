@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links
+from ..core import links, reactions
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -34,7 +34,7 @@ from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
 from .pathline import PATH_INK
 from .qr import QrScreen, qr_strip
-from .theme import snr_style
+from .theme import emoticon, name_style, snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
     DM_BYTE_LIMIT,
@@ -74,12 +74,18 @@ _URL_GUTTER = 2
 #: only on the PicoCalc). Bound for each platform, never asked at each frame.
 _URL_CODES = False
 
+#: The mark in front of the count of a reaction. Where the font has no emoji, an emoticon
+#: such as ``+1`` or ``<3`` stands in for the emoji, and a bare count after it reads as part
+#: of it (``+1 3``). There, the count is ``x3``. Bound for each platform.
+_COUNT_MARK = ""
+
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Hang codes under URLs where the platform draws them (now and at each switch)."""
-    global _URL_CODES
+    """Bind the choices of the transcript that depend on the platform (now and at each switch)."""
+    global _URL_CODES, _COUNT_MARK
     _URL_CODES = platform.url_codes
+    _COUNT_MARK = "" if platform.emoji else "x"
 
 
 #: The maximum width of a footer hint, in cells (refer to the UX standards).
@@ -113,8 +119,14 @@ class ChatScreen(Screen):
     of the selected message. A path belongs to one message, so when no message is
     selected, there is nothing to show. ^U shows the links of the selected message as QR
     codes, on the share screen. ^L opens the map on the node of the author of the selected
-    message, when that node has a location. When no message is selected, Esc leaves the
+    message, when that node has a location. ^E reacts to the selected message with an emoji
+    (refer to :mod:`~meshterm.core.reactions`). When no message is selected, Esc leaves the
     chat.
+
+    A reaction is a message on the wire, but the transcript does not show it as one. It shows
+    each reaction under the message that it reacts to: the emoji and a count, or the names of
+    the nodes that reacted while that message is selected. A room has no reactions, so a
+    room shows each message as it arrived.
 
     A channel with a send scope shows its region in the title (``#ops · yul``). There, ^R
     sends a message again *unscoped*: the selected message, or the newest when no message is
@@ -147,6 +159,11 @@ class ChatScreen(Screen):
         On the PicoCalc, the transcript already draws each code under its message in the
         same size, so there the chip only shows one code alone. ``Map`` is lit while the
         author of the selection has a location (refer to :meth:`_locate_target`).
+
+        ``React`` (^E) is on the Shift half of F2, behind ``URL→QR``. A channel and a DM have
+        it, and a room does not. Thus it goes on the Shift bank, the bank for a verb that not
+        all three screens share. A room puts ``Log in`` there instead. ``React`` is lit while
+        the selection is a message that a reaction can name (refer to :meth:`_can_react`).
 
         ``Author`` (^O, the node page of the author of the selection) is the fourth shared
         verb, and the plain bank has only three slots. Thus it is on the Shift half of F3,
@@ -193,7 +210,14 @@ class ChatScreen(Screen):
             enabled=self._selected is not None and self._paths is not None,
             opp_enabled=self._retry_target() is not None,
         )
-        lane[1] = FPair("URL→QR", "url_code", enabled=bool(self._picked_urls()))
+        react = ("React", "react") if self._fold is not None else ("", "")
+        lane[1] = FPair(
+            "URL→QR",
+            "url_code",
+            *react,
+            enabled=bool(self._picked_urls()),
+            opp_enabled=self._can_react(),
+        )
         if self._locator is not None or self._pages is not None:
             where = ("Map", "locate") if self._locator is not None else ("", "")
             who = ("Author", "author_page") if self._pages is not None else ("", "")
@@ -222,6 +246,8 @@ class ChatScreen(Screen):
         resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
         locator: Locator | None = None,
         pages: ContactPages | None = None,
+        self_name: str | None = None,
+        reaction_set: list[str] | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -259,6 +285,11 @@ class ChatScreen(Screen):
             pages: The contacts, for ^O: the node page of the author of the selected
                 message (refer to :class:`~meshterm.ui.node_detail_screen.ContactPages`).
                 With ``None``, ^O does nothing.
+            self_name: The name of our node. A channel reaction names the author of its
+                target, and our node is the author of each message that we sent. With
+                ``None``, our channel messages get no reactions.
+            reaction_set: The emoji that ^E offers, in order. ``None`` offers
+                :data:`~meshterm.core.reactions.DEFAULT_REACTIONS`.
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
@@ -281,7 +312,15 @@ class ChatScreen(Screen):
             if conversation.is_channel or contact is None
             else (contact.public_key or contact.key_prefix or "")
         )
-        self._messages = list(messages)
+        # The reactions of the conversation, folded onto their targets. A room has none.
+        self._fold = (
+            None
+            if conversation.is_room
+            else reactions.ReactionFold(channel=conversation.is_channel, self_name=self_name)
+        )
+        self._reaction_set = reaction_set or reactions.DEFAULT_REACTIONS.split()
+        self._peer_label = conversation.label
+        self._messages = [m for m in messages if not self._folds(m)]
         self._send = send
         self._resend = resend
         self._resend_unscoped = resend_unscoped if conversation.is_channel else None
@@ -305,6 +344,7 @@ class ChatScreen(Screen):
         self._codes_open = False  # one share screen of links at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
+        self._react_open = False  # one reaction dialog at a time
         # The selection: the index of the highlighted message (or None when the compose
         # line has the focus), and the body line where it rendered, so that the frame keeps
         # it visible.
@@ -348,6 +388,7 @@ class ChatScreen(Screen):
             code = "^U QR" if self._picked_urls() else ""
             where = "^L map" if self._locate_target() is not None else ""
             who = "^O author" if self._author_page() is not None else ""
+            react = "^E react" if self._can_react() else ""
             if self._is_channel and self._retry_target() is not None:
                 # A selected scoped message of ours can be sent again unscoped, and the hint
                 # must name that key. The "(@mention)" of the reply and ^End are removed to
@@ -362,11 +403,12 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        react,
                         "^R resend unscoped",
                         "↑↓ pick",
                         "Esc cancel",
                     ],
-                    spare=("↑↓ pick", "^P paths", "^O author"),
+                    spare=("↑↓ pick", "^P paths", "^O author", "^E react"),
                 )
             if self._replies:
                 # With all the keys of a selection, the long words do not fit in 72 cells.
@@ -378,6 +420,7 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        react,
                         "↑↓ pick",
                         "^End/Esc cancel",
                     ],
@@ -385,13 +428,15 @@ class ChatScreen(Screen):
                 )
                 if cell_len(hint) <= _HINT_CELLS:
                     return hint
+                # ^E goes after ↑↓ when even the short words do not fit. The keys of the
+                # selection that were here before ^E keep their places.
                 return _fit_hint(
-                    ["Enter reply", "^P paths", code, where, who, "↑↓ pick", "Esc cancel"],
-                    spare=("↑↓ pick",),
+                    ["Enter reply", "^P paths", code, where, who, react, "↑↓ pick", "Esc cancel"],
+                    spare=("↑↓ pick", "^E react"),
                 )
             return _fit_hint(
-                ["Enter paths", code, where, who, "↑↓ pick", "^End/Esc cancel"],
-                spare=("↑↓ pick",),
+                ["Enter paths", code, where, who, react, "↑↓ pick", "^End/Esc cancel"],
+                spare=("↑↓ pick", "^E react"),
             )
         if self._retry_target() is not None:
             if self._is_channel:
@@ -402,7 +447,14 @@ class ChatScreen(Screen):
     # --- live updates --------------------------------------------------------
 
     def append(self, message: ChatMessage) -> None:
-        """Append an inbound message to the transcript and paint."""
+        """Append an inbound message to the transcript and paint.
+
+        A reaction goes onto the message that it reacts to, and the transcript does not
+        move for it.
+        """
+        if self._folds(message):
+            self._session.invalidate()
+            return
         self._messages.append(message)
         # Do not pull the viewport to the tail while the user selects a message to reply to.
         if self._selected is None:
@@ -549,7 +601,8 @@ class ChatScreen(Screen):
           tick),
         * it is the selected message (the selection sets its style, not the message), or
         * its identity or ``acked`` is different from the cache (it was appended, it was
-          replaced in place when a pending bubble resolved, or it was removed).
+          replaced in place when a pending bubble resolved, or it was removed), or
+        * its number of reactions is different from the cache (a reaction arrived).
 
         Most importantly, this works for each message. It is not a cached prefix that
         stops at the first such row. Thus a message stays cheap to draw again, however far
@@ -565,11 +618,12 @@ class ChatScreen(Screen):
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
             cached_selected = cache["selected"]
+            cached_reacts = cache["reacts"]
             cached_boundaries = cache["boundaries"]
             cached_lines = cache["lines"]
             cache_count = len(cached_ids)
         else:
-            cached_ids = cached_acked = cached_selected = cached_boundaries = ()
+            cached_ids = cached_acked = cached_selected = cached_reacts = cached_boundaries = ()
             cached_lines = []
             cache_count = 0
 
@@ -583,6 +637,7 @@ class ChatScreen(Screen):
         ids: list[int] = []
         ackeds: list[bool | None] = []
         selecteds: list[bool] = []
+        reacts: list[int] = []
         boundaries: list[int] = []
         prev_group: tuple[bool, str] | None = None
         prev_day = None
@@ -598,6 +653,7 @@ class ChatScreen(Screen):
             new_day = day != prev_day
             selected = idx == self._selected
             pending = message.acked is None and message.outbound and not message.is_channel
+            react_count = self._fold.count(message) if self._fold is not None else 0
             reusable = (
                 not selected
                 and not pending
@@ -605,6 +661,7 @@ class ChatScreen(Screen):
                 and not cached_selected[idx]
                 and cached_ids[idx] == id(message)
                 and cached_acked[idx] == message.acked
+                and cached_reacts[idx] == react_count
             )
             if reusable:
                 start = cached_boundaries[idx - 1] if idx > 0 else 0
@@ -646,6 +703,7 @@ class ChatScreen(Screen):
             ids.append(id(message))
             ackeds.append(message.acked)
             selecteds.append(selected)
+            reacts.append(react_count)
             boundaries.append(len(lines))
 
         self._render_cache = {
@@ -653,6 +711,7 @@ class ChatScreen(Screen):
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
+            "reacts": reacts,
             "lines": lines,
             "boundaries": boundaries,
         }
@@ -741,7 +800,50 @@ class ChatScreen(Screen):
         urls = links.urls(body) if _URL_CODES else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
+        badges = self._fold.badges(message) if self._fold is not None else []
+        if badges:
+            row, runs = self._badge_text(badges, selected=selected)
+            lines += render_hanging(
+                Text(" " * prefix.cell_len), row, width, indent=prefix.cell_len, whole=runs
+            )
         return lines
+
+    def _badge_text(
+        self, badges: list[reactions.Badge], *, selected: bool
+    ) -> tuple[Text, list[tuple[int, int]]]:
+        """The reactions on one message, as one line under its body, and the runs to keep whole.
+
+        Each emoji has its count after it. The count is ``accent`` when our node is one of
+        the nodes that reacted, else ``muted``. On the selected message, the names of the
+        nodes take the place of the count, each in the hue of its node, and our node is the
+        white ``you``. Where the font has no emoji, an emoticon stands in for each default
+        reaction (refer to :func:`~meshterm.ui.theme.emoticon`).
+        """
+        text = Text()
+        runs: list[tuple[int, int]] = []
+        for index, badge in enumerate(badges):
+            if index:
+                text.append("  ")
+            start = len(text)
+            text.append(emoticon(badge.emoji))
+            text.append(" ")
+            if not selected:
+                count = f"{_COUNT_MARK}{len(badge.reactors)}"
+                text.append(count, style="accent" if badge.ours else "muted")
+                runs.append((start, len(text)))
+                continue
+            for number, reactor in enumerate(badge.reactors):
+                if number:
+                    text.append(", ", style="muted")
+                if reactor.ours:
+                    text.append("you", style="you")
+                else:
+                    name = reactor.name or self._peer_label
+                    key = self._peer_key if reactor.name is None else self._sender_key(name)
+                    text.append(name, style=name_style(name, key or None))
+                if not number:
+                    runs.append((start, len(text)))  # the emoji never ends a line alone
+        return text, runs
 
     def _body_text(self, body: str, message: ChatMessage, *, selected: bool) -> Text:
         """Build the styled body of a message: mentions in colour, then the glyphs at the end."""
@@ -872,10 +974,10 @@ class ChatScreen(Screen):
         Ctrl+PgUp/PgDn (day dividers), and the viewport moves with it. Enter on a selected
         message starts a reply with an ``@mention`` in a channel, and opens the delivery
         paths in a direct chat. In the two types of chat, ^P opens the paths of the
-        selected message, ^U the QR codes of its links, and ^L the map on its author. The
-        three do nothing when no message is selected. ^End (or a move past the newest
-        message) goes back to the compose line. The first Esc clears the selection, and the
-        second Esc leaves the screen.
+        selected message, ^U the QR codes of its links, ^L the map on its author, and ^E the
+        reaction dialog. The four do nothing when no message is selected. ^End (or a move
+        past the newest message) goes back to the compose line. The first Esc clears the
+        selection, and the second Esc leaves the screen.
         """
         if action == "enter":
             if self._selected is not None:
@@ -895,6 +997,8 @@ class ChatScreen(Screen):
             self._open_map()
         elif action == "author_page":
             self._open_author_page()
+        elif action == "react":
+            self._begin_react()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -1224,7 +1328,7 @@ class ChatScreen(Screen):
         try:
             message = await self._send(text)
             if message is not None:
-                self._messages.append(message)
+                self._admit(message)
             self._status = ""
         except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             self._status = f"send failed: {exc}"
@@ -1382,7 +1486,7 @@ class ChatScreen(Screen):
             try:
                 message = await self._resend_unscoped(target)
                 if message is not None:
-                    self._messages.append(message)
+                    self._admit(message)
                 self._status = ""
             except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
                 self._status = f"resend failed: {exc}"
@@ -1409,11 +1513,114 @@ class ChatScreen(Screen):
             self._session.invalidate()
 
     def _swap(self, old: ChatMessage, new: ChatMessage) -> None:
-        """Replace an optimistic bubble with its stored message, in place."""
+        """Replace an optimistic bubble with its stored message, in place.
+
+        The stored message is the one that a reaction can name, because it has the
+        timestamp that went out. Thus the fold takes it here, and not the bubble.
+        """
+        if self._folds(new):
+            self._discard(old)
+            return
         try:
             self._messages[self._messages.index(old)] = new
         except ValueError:  # pragma: no cover - the bubble is always still there
             self._messages.append(new)
+
+    def _folds(self, message: ChatMessage) -> bool:
+        """Give ``message`` to the fold. ``True`` for a reaction, which the transcript omits."""
+        return self._fold is not None and self._fold.take(message)
+
+    def _admit(self, message: ChatMessage) -> None:
+        """Append a message that we sent, unless it is a reaction (the fold shows that one)."""
+        if not self._folds(message):
+            self._messages.append(message)
+
+    # --- reactions -------------------------------------------------------------
+
+    def _react_target(self) -> tuple[ChatMessage, str | None, str, int] | None:
+        """The selected message, and the author, body, and timestamp that a reaction names it by.
+
+        ``None`` when nothing is selected, or when a reaction cannot name the selection: a
+        room, a message that is still in flight, or a channel message with no author (a
+        line with no ``Name: `` prefix, or one of ours when our name is not known).
+        """
+        if self._fold is None or self._selected is None or not self._messages:
+            return None
+        message = self._messages[min(self._selected, len(self._messages) - 1)]
+        named = self._fold.target_of(message)
+        if named is None:
+            return None
+        author, body, timestamp = named
+        if self._is_channel and not author:
+            return None
+        return message, author, body, timestamp
+
+    def _can_react(self) -> bool:
+        """Whether ^E can start a reaction: a selection that a reaction can name, and no send."""
+        return not self._sending and self._composing and self._react_target() is not None
+
+    def _begin_react(self) -> None:
+        """Ask which emoji, then send the reaction to the selected message (^E).
+
+        The dialog is a question, so it floats as a box over the chat. Each row is an emoji
+        of the ``reaction_emoji`` preference, with its name. A row that our node already sent
+        to this message says so. A second copy of it would only count one time, so the
+        selection of that row sends nothing. The reaction goes out as a usual message in
+        the conversation. When it is stored, the fold puts it under its target (refer to
+        :meth:`_admit`).
+        """
+        target = self._react_target()
+        if target is None or self._sending or self._react_open or self._fold is None:
+            return
+        message, author, body, timestamp = target
+        fold = self._fold
+        self._react_open = True
+        sender, _ = self._sender_and_body(message)
+        who = "your message" if message.outbound else sender
+
+        async def run() -> None:
+            from .menus import menu_rows
+
+            rows = []
+            for emoji in self._reaction_set:
+                name = reactions.emoji_name(emoji)
+                sent = fold.reacted(message, emoji)
+                rows.append((emoticon(emoji), f"{name} · sent" if sent else name, emoji))
+            try:
+                emoji = await self._session.select(
+                    f"React — {who}", menu_rows(rows), filterable=False, floating=True
+                )
+            finally:
+                self._react_open = False
+            if not emoji or self._sending:
+                self._session.invalidate()
+                return
+            if fold.reacted(message, emoji):
+                self._status = "you already reacted with that"
+                self._session.invalidate()
+                return
+            if self._is_channel:
+                text = reactions.channel_text(emoji, author or "", body, timestamp)
+            else:
+                text = reactions.direct_text(emoji, body, timestamp)
+            self._sending = True
+            self._status = "reacting…"
+            self._session.invalidate()
+            try:
+                sent_message = await self._send(text)
+                if sent_message is not None:
+                    self._admit(sent_message)
+                    no_ack = not self._is_channel and sent_message.acked is False
+                    self._status = "reaction sent · no ack" if no_ack else ""
+                else:
+                    self._status = ""
+            except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
+                self._status = f"reaction failed: {exc}"
+            finally:
+                self._sending = False
+                self._session.invalidate()
+
+        self._spawn(run())
 
     def _discard(self, message: ChatMessage) -> None:
         """Remove an optimistic bubble that never became a real message."""
@@ -1504,6 +1711,11 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     from .node_detail_screen import ContactPages
 
     paths = await _make_paths_presenter(ctx, conversation, device)
+    self_name: str | None = None
+    try:
+        self_name = str((await ctx.devstate.self_info()).get("name") or "") or None
+    except Exception:  # noqa: BLE001 - with no name, our channel messages get no reactions
+        self_name = None
     screen = ChatScreen(
         conversation,
         history,
@@ -1517,6 +1729,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
         pages=await ContactPages.gather(ctx),
+        self_name=self_name,
+        reaction_set=reactions.reaction_set(ctx.preferences.reaction_emoji),
     )
     ctx.chat.set_active(conversation.key)
 

@@ -244,7 +244,8 @@ def test_the_app_draws_no_text_default_emoji_its_vocabulary_does_not_name() -> N
     screen, and does not name in the list, fails here. Without the test, the mark would get
     a blank cell next to it with no warning. The test skips prose, because MeshTerm reads
     docstrings and bare strings and does not draw them. It also skips the module that defines
-    the list.
+    the list. It also skips the vocabulary of reactions, which is content that other apps
+    send.
     """
     from rich._unicode_data import load
 
@@ -254,13 +255,17 @@ def test_the_app_draws_no_text_default_emoji_its_vocabulary_does_not_name() -> N
         if not char.isascii() and char not in cells._SINGLE_CELLS
     }
     # Inputs to the substitution table of the PicoCalc, which maps them to glyphs that its
-    # font has. A terminal that shows emoji never draws them, so they are not marks.
-    fold_inputs = {"↪", "✔", "✖"}
+    # font has. A terminal that shows emoji never draws them, so they are not marks. The
+    # heart is the key of an emoticon (theme._EMOTICONS), which only a handheld uses.
+    fold_inputs = {"↪", "✔", "✖", "❤"}
 
     package = pathlib.Path(ew.__file__).parents[2]
     drawn: set[str] = set()
     for path in package.rglob("*.py"):
-        if path.name == "emoji_width.py":
+        # The reactions module holds the emoji that other apps send (the defaults of
+        # MeshCore One, the table of meshcore-open). These are content, not marks of the
+        # app, and each one that is text-default carries its variation selector.
+        if path.name in ("emoji_width.py", "reactions.py"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         prose = {

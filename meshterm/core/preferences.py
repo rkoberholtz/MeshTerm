@@ -55,6 +55,7 @@ from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
 from .models import NAME_OVERLAP_DAYS
+from .reactions import DEFAULT_REACTIONS
 from .watch_store import ALERT_CAP, DEFAULT_SILENCE_HOURS, OFF, SILENCE_CHOICES_H
 
 if sys.version_info >= (3, 11):
@@ -289,6 +290,16 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         default=0,  # one try: a resend is a second transmission on a shared mesh
         minimum=0,
         maximum=2,
+    ),
+    PrefSpec(
+        key="reaction_emoji",
+        label="Reactions",
+        help="Emoji to offer when you react to a message",
+        group="Sending",
+        value_type="str",
+        # The default set of MeshCore One. A word that is not one emoji is ignored when the
+        # chat reads the list (refer to meshterm.core.reactions.reaction_set).
+        default=DEFAULT_REACTIONS,
     ),
     PrefSpec(
         key="room_relogin_minutes",

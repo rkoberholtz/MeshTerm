@@ -102,6 +102,9 @@ from .spinner import spinner_interval
 #: ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
+    # ^E reacts to the selected message with an emoji. The raw mode of prompt_toolkit has no
+    # line editing, so ^E is not "end of line" here (the End key moves the caret).
+    "e": "react",
     # ^G logs in to the room that a room screen shows. In the input, ^G is not a special key:
     # it is the bell only in output, and no terminal or multiplexer takes it.
     "g": "login",
