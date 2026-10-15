@@ -393,3 +393,18 @@ def test_the_messages_list_previews_a_reaction_in_words() -> None:
     assert "Bob" in preview and "reacted 👍" in preview and "@[" not in preview
     ours = ChatMessage(text=reactions.direct_text("😂", "hi", _T), outbound=True)
     assert "reacted 😂" in _preview_text(ours, lambda name: None).plain
+
+
+def test_a_reaction_from_a_node_with_a_long_name_folds() -> None:
+    """A node name can have 31 characters. A sender of 22 is still split off its reaction.
+
+    The two messages are from the hardware log that found the fault: the name limit was 20,
+    so the reaction of ``Hazelwood r0b3.Anduril`` showed as a new message.
+    """
+    fold = ReactionFold(channel=True)
+    target = _channel("Hazelwood: ⚽ Union 2-1 at Chicago Fire (59')", 1_792_029_645)
+    fold.take(target)
+    react = _channel("Hazelwood r0b3.Anduril: @[Hazelwood]🔥\nmzjsjjpk", 1_792_029_654)
+    assert fold.take(react) is True
+    (badge,) = fold.badges(target)
+    assert badge.emoji == "🔥" and badge.reactors == [reactions.Reactor("Hazelwood r0b3.Anduril")]

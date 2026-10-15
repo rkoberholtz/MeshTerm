@@ -35,17 +35,21 @@ from urllib.parse import parse_qs, quote, urlsplit
 # not one time for each candidate channel. Thus the reception path pays almost nothing.
 
 #: Matches the ``Name: message`` convention that channel senders use to identify themselves
-#: (the protocol has no sender field). The name is 1–20 characters that are not colons, and
+#: (the protocol has no sender field). The name is 1–31 characters that are not colons, and
 #: ``": "`` must follow it. This rule is strict enough that it does not match ``http://…``
-#: or ``note:x``.
-SENDER_PREFIX = re.compile(r"^([^\s:][^:]{0,19}):[ \t]+(.*)$", re.DOTALL)
+#: or ``note:x``. The firmware keeps a node name in 32 bytes with its terminator, so 31 is
+#: the longest name that a sender can have. A limit of 20 left
+#: a longer name in the body. Then the transcript showed no sender for it, and a reaction
+#: from it did not read as a reaction.
+SENDER_PREFIX = re.compile(r"^([^\s:][^:]{0,30}):[ \t]+(.*)$", re.DOTALL)
 
 #: Matches an ``@[Name]`` mention token, which the reply flow puts into the compose line in
 #: advance. A transcript renders each token as a bare ``@Name`` in the hue of that sender,
 #: and does not show the brackets. The history face of the CLI also takes out the same
 #: names. Thus the token is defined here, with the remainder of the message-body parsing, and
-#: not in one of the two renderers. The name is 1–20 characters that are not ``]``.
-MENTION = re.compile(r"@\[([^\]]{1,20})\]")
+#: not in one of the two renderers. The name is 1–31 characters that are not ``]``, the
+#: same limit as :data:`SENDER_PREFIX`.
+MENTION = re.compile(r"@\[([^\]]{1,31})\]")
 
 
 def split_channel_sender(text: str) -> tuple[str | None, str]:
