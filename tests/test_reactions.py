@@ -316,12 +316,15 @@ class _Session:
     def __init__(self, answer: str | None) -> None:
         self.answer = answer
         self.asked: list[str] = []
+        self.items: list = []
+        self.filterable: bool | None = None
 
     def invalidate(self) -> None:
         pass
 
-    async def select(self, title, items, **_kw):  # noqa: ANN001, ANN003, ANN201
+    async def select(self, title, items, *, filterable=True, **_kw):  # noqa: ANN001, ANN003, ANN201
         self.asked.append(title)
+        self.items, self.filterable = items, filterable
         return self.answer
 
 
@@ -408,3 +411,26 @@ def test_a_reaction_from_a_node_with_a_long_name_folds() -> None:
     assert fold.take(react) is True
     (badge,) = fold.badges(target)
     assert badge.emoji == "🔥" and badge.reactors == [reactions.Reactor("Hazelwood r0b3.Anduril")]
+
+
+async def test_the_reaction_dialog_searches_every_emoji_by_name() -> None:
+    """The preferred emoji come first, then each other emoji. A typed name filters them all."""
+    from meshterm.ui.chat import emoji_catalog
+    from meshterm.ui.tui import Choice, Separator
+
+    session = _Session(None)
+    screen = _screen([_channel("Alice: hi all")], session, [])
+    screen.handle("up")
+    screen.handle("react")
+    await asyncio.sleep(0)
+    await asyncio.gather(*screen._tasks)
+    assert session.filterable is True
+    values = [item.value for item in session.items if isinstance(item, Choice)]
+    assert values[:6] == reactions.DEFAULT_REACTIONS.split()
+    assert "🔥" in values and values.count("👍") == 1  # a preferred emoji is listed once
+    assert isinstance(session.items[0], Separator)  # "Your reactions", then "All emoji"
+    assert sum(isinstance(item, Separator) for item in session.items) == 2
+    fire = next(i for i in session.items if isinstance(i, Choice) and i.value == "🔥")
+    assert "fire" in fire.label.plain
+    assert len(emoji_catalog()) > 1000
+    assert all(reactions.is_reaction_emoji(emoji) for emoji in emoji_catalog())

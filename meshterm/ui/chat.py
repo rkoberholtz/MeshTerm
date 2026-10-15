@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
@@ -1562,12 +1564,14 @@ class ChatScreen(Screen):
     def _begin_react(self) -> None:
         """Ask which emoji, then send the reaction to the selected message (^E).
 
-        The dialog is a question, so it floats as a box over the chat. Each row is an emoji
-        of the ``reaction_emoji`` preference, with its name. A row that our node already sent
-        to this message says so. A second copy of it would only count one time, so the
-        selection of that row sends nothing. The reaction goes out as a usual message in
-        the conversation. When it is stored, the fold puts it under its target (refer to
-        :meth:`_admit`).
+        The dialog is a question, so it floats as a box over the chat. The emoji of the
+        ``reaction_emoji`` preference come first, then each other emoji (refer to
+        :func:`emoji_catalog`). Each row has the name of its emoji, so a typed word such as
+        ``fire`` or ``heart`` filters the list to the emoji that it names. A row that our
+        node already sent to this message says so. A second copy of it would only count one
+        time, so the selection of that row sends nothing. The reaction goes out as a usual
+        message in the conversation. When it is stored, the fold puts it under its target
+        (refer to :meth:`_admit`).
         """
         target = self._react_target()
         if target is None or self._sending or self._react_open or self._fold is None:
@@ -1579,16 +1583,25 @@ class ChatScreen(Screen):
         who = "your message" if message.outbound else sender
 
         async def run() -> None:
-            from .menus import menu_rows
+            from .menus import menu_rows, section_heading
 
-            rows = []
-            for emoji in self._reaction_set:
+            def row(emoji: str) -> tuple[str, str, str]:
                 name = reactions.emoji_name(emoji)
                 sent = fold.reacted(message, emoji)
-                rows.append((emoticon(emoji), f"{name} · sent" if sent else name, emoji))
+                return emoticon(emoji), f"{name} · sent" if sent else name, emoji
+
+            mine = list(self._reaction_set)
+            others = [emoji for emoji in emoji_catalog() if emoji not in mine]
+            rows = menu_rows([row(emoji) for emoji in mine + others])
+            items = [
+                section_heading("Your reactions"),
+                *rows[: len(mine)],
+                section_heading("All emoji"),
+                *rows[len(mine) :],
+            ]
             try:
                 emoji = await self._session.select(
-                    f"React — {who}", menu_rows(rows), filterable=False, floating=True
+                    f"React — {who}", items, filterable=True, floating=True
                 )
             finally:
                 self._react_open = False
@@ -1628,6 +1641,47 @@ class ChatScreen(Screen):
             self._messages.remove(message)
         except ValueError:  # pragma: no cover - a defensive check
             pass
+
+
+#: The blocks of Unicode where an emoji with the emoji presentation can be. A wide symbol
+#: between them is a CJK symbol or radical, not an emoji.
+_EMOJI_BLOCKS = ((0x2000, 0x2E7F), (0x1F000, 0x1FAFF))
+
+#: The I Ching symbols, which Unicode 16 draws wide. They are symbols, not emoji: the
+#: firmware and the other apps never offer them.
+_NOT_EMOJI = frozenset(range(0x268A, 0x2690)) | frozenset(range(0x2630, 0x2638))
+
+
+@lru_cache(maxsize=1)
+def emoji_catalog() -> tuple[str, ...]:
+    """Each single emoji that the reaction dialog offers, in the order of Unicode.
+
+    The standard library has no list of emoji. Thus the catalog takes two sets. The first is
+    each symbol in the emoji blocks that Unicode draws wide by default (``🔥``, ``⌚``). The
+    second is the emoji that are text by default (``❤``), which the table of Rich lists.
+    Each of these gets the variation selector that asks for the emoji form (``❤️``), as the
+    apps send it. A flag, a skin tone, and a joined sequence are not in the catalog, but a
+    reaction with one still shows when it arrives. The names come from the Unicode database
+    of the Python that runs MeshTerm, so a newer Python offers newer emoji.
+    """
+    from rich._unicode_data import load
+
+    found: dict[int, str] = {}
+    for first, last in _EMOJI_BLOCKS:
+        for cp in range(first, last + 1):
+            char = chr(cp)
+            if cp in _NOT_EMOJI:
+                continue
+            if unicodedata.category(char) == "So" and unicodedata.east_asian_width(char) == "W":
+                found[cp] = char
+    for char in load("auto").narrow_to_wide:
+        if not char.isascii() and len(char) == 1:
+            found.setdefault(ord(char), char + "\ufe0f")
+    return tuple(
+        emoji
+        for _, emoji in sorted(found.items())
+        if not reactions._is_regional(emoji[0]) and reactions.is_reaction_emoji(emoji)
+    )
 
 
 async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
