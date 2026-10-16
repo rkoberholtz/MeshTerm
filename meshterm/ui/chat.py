@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links
+from ..core import links, parts
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -222,6 +222,8 @@ class ChatScreen(Screen):
         resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None,
         locator: Locator | None = None,
         pages: ContactPages | None = None,
+        max_parts: int = 1,
+        part_gap_s: float = 0.0,
     ) -> None:
         """Build the chat screen.
 
@@ -259,6 +261,12 @@ class ChatScreen(Screen):
             pages: The contacts, for ^O: the node page of the author of the selected
                 message (refer to :class:`~meshterm.ui.node_detail_screen.ContactPages`).
                 With ``None``, ^O does nothing.
+            max_parts: The largest number of parts for a message that is too long for one
+                packet (refer to :mod:`meshterm.core.parts`). With 1, a message that is
+                too long is refused.
+            part_gap_s: The time to wait between two parts of a channel message, so that
+                the parts do not go out as a burst. A direct part waits for its
+                acknowledgement, and does not wait this time.
         """
         super().__init__()
         self._scope = scope if conversation.is_channel else None
@@ -285,6 +293,8 @@ class ChatScreen(Screen):
         self._send = send
         self._resend = resend
         self._resend_unscoped = resend_unscoped if conversation.is_channel else None
+        self._max_parts = max(1, max_parts)
+        self._part_gap_s = max(0.0, part_gap_s)
         self._paths = paths
         self._locator = locator
         self._pages = pages
@@ -498,22 +508,33 @@ class ChatScreen(Screen):
         return len(self._editor.text.encode("utf-8"))
 
     def _overflow_at(self, limit: int) -> int | None:
-        """The index of the first compose character with bytes past ``limit``, or ``None``.
+        """The index of the first compose character that cannot be sent, or ``None``.
 
-        The count goes by character (not by byte), so multibyte input stays complete: an
-        emoji or an accented letter is fully under or fully over the line, never divided
-        in the middle of its sequence.
+        With no parts, this is the first character with bytes past ``limit``. With parts,
+        it is the first character that does not fit in the last part (refer to
+        :func:`~meshterm.core.parts.overflow_at`). The count goes by character (not by
+        byte), so multibyte input stays complete: an emoji or an accented letter is fully
+        under or fully over the line, never divided in the middle of its sequence.
         """
-        total = 0
-        for i, ch in enumerate(self._editor.text):
-            total += len(ch.encode("utf-8"))
-            if total > limit:
-                return i
-        return None
+        return parts.overflow_at(self._editor.text, limit, self._max_parts)
+
+    def _parts(self, text: str) -> list[str] | None:
+        """The messages that ``text`` goes out as, or ``None`` when it has too many parts."""
+        return parts.split(text, self._byte_limit(), self._max_parts)
 
     def _byte_counter(self, limit: int) -> Text:
-        """The inline ``used/limit`` counter: the shared compose gauge (:func:`byte_counter`)."""
-        return byte_counter(self._used_bytes(), limit)
+        """The inline ``used/limit`` counter: the shared compose gauge (:func:`byte_counter`).
+
+        When the text goes out as more than one part, the counter starts with the number
+        of parts, and the gauge shows the bytes of the last part, with its part number.
+        Thus the gauge tells how much the user can add before one more part starts.
+        """
+        cut = self._parts(self._editor.text.strip())
+        if cut is None or len(cut) < 2:
+            return byte_counter(self._used_bytes(), limit)
+        counter = Text(f"{len(cut)} parts · ", style="muted")
+        counter.append_text(byte_counter(len(cut[-1].encode("utf-8")), limit))
+        return counter
 
     def _name(self, peer: str | None) -> str | None:
         """Find the contact name for a sender key prefix (exact match, then prefix match)."""
@@ -1189,17 +1210,22 @@ class ChatScreen(Screen):
     def _submit(self) -> None:
         """Send the current input line as a message (scheduled from the key handler).
 
-        A line over the limit is refused. The buffer stays the same (so that the user can
-        make it shorter), and the status shows the overage, the same as the red overflow
-        that the compose bar already shows.
+        A line that is too long for one packet goes out as parts, each with its part number
+        (refer to :mod:`meshterm.core.parts`), when the ``message_parts_max`` preference
+        permits more than one part. A line that is too long for all the parts is refused.
+        The buffer stays the same (so that the user can make it shorter), and the status
+        shows why, the same as the red overflow that the compose bar already shows.
         """
         text = self._editor.text.strip()
         if not text or self._sending:
             return
-        limit = self._byte_limit()
-        over = self._used_bytes() - limit
-        if over > 0:
-            self._status = f"Too long by {over} byte{'s' if over != 1 else ''} — trim to send."
+        cut = self._parts(text)
+        if cut is None:
+            if self._max_parts < 2:
+                over = self._used_bytes() - self._byte_limit()
+                self._status = f"Too long by {over} byte{'s' if over != 1 else ''} — trim to send."
+            else:
+                self._status = f"Too long for {self._max_parts} parts — trim to send."
             self._session.invalidate()
             return
         self._editor = LineEditor()
@@ -1208,26 +1234,53 @@ class ChatScreen(Screen):
         if self._is_channel:
             self._status = "sending…"
             self._session.invalidate()
-            self._spawn(self._send_channel(text))
+            self._spawn(self._send_channel(cut))
         else:
-            # A direct chat shows an optimistic bubble. The mark at its end shows the
-            # delivery: a spinner now, then ✓/✗ when the ack resolves (or times out).
-            # acked=None ⇒ the spinner still turns.
-            pending = ChatMessage(text=text, outbound=True, created_at=utcnow())
-            self._messages.append(pending)
             self._status = ""
             self._session.invalidate()
-            self._spawn(self._send_direct(pending))
+            self._spawn(self._send_direct(cut))
 
-    async def _send_channel(self, text: str) -> None:
-        """Broadcast a channel message, and append it when the companion accepts it."""
+    def _sending_part(self, index: int, total: int) -> None:
+        """Show which part goes out now, when a message has more than one."""
+        if total > 1:
+            self._status = f"sending part {index} of {total}…"
+            self._session.invalidate()
+
+    def _keep_unsent(self, cut: list[str], first: int) -> None:
+        """Put the text of the parts that did not go out back in the compose line.
+
+        ``first`` is the index in ``cut`` of the first part that did not go out. The text
+        goes back without its part numbers, so that Enter cuts it again. If the user typed
+        something new in the meantime, the line stays as it is, and the text is lost.
+        """
+        if self._editor.text or first >= len(cut):
+            return
+        total = len(cut)
+        rest = " ".join(parts.unnumbered(cut[i], i + 1, total) for i in range(first, total))
+        self._editor = LineEditor(rest)
+
+    async def _send_channel(self, cut: list[str]) -> None:
+        """Broadcast each part of a channel message, and append each when the device takes it.
+
+        Between two parts, the send waits ``part_gap_s``, so that the floods do not go out
+        as a burst. If a part fails, the parts after it do not go out, and their text goes
+        back in the compose line.
+        """
+        sent = 0
         try:
-            message = await self._send(text)
-            if message is not None:
-                self._messages.append(message)
+            for i, text in enumerate(cut):
+                if i:
+                    await asyncio.sleep(self._part_gap_s)
+                self._sending_part(i + 1, len(cut))
+                message = await self._send(text)
+                sent += 1
+                if message is not None:
+                    self._messages.append(message)
+                    self._session.invalidate()
             self._status = ""
         except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             self._status = f"send failed: {exc}"
+            self._keep_unsent(cut, sent)
         finally:
             self._sending = False
             self._stick = True
@@ -1264,25 +1317,40 @@ class ChatScreen(Screen):
             except Exception:  # noqa: BLE001 - a spinner problem must never break a send
                 pass
 
-    async def _send_direct(self, pending: ChatMessage) -> None:
-        """Await the delivery of the optimistic ``pending`` bubble, then put in the stored row.
+    async def _send_direct(self, cut: list[str]) -> None:
+        """Send each part of a direct message, and show each as an optimistic bubble.
 
-        On success, the stored message replaces the pending bubble. The stored message has
-        its resolved ``acked`` state and its row id, so that the user can retry a ✗ later
-        in place. A hard failure (the companion refuses the send) removes the bubble and
-        shows the error inline, the same as a failed send always did.
+        Each part shows as a pending bubble while its delivery is in flight. On success,
+        the stored message replaces the bubble. The stored message has its resolved
+        ``acked`` state and its row id, so that the user can retry a ✗ later in place. A
+        part goes out when the part before it is acknowledged or its wait ends. A part with
+        no acknowledgement can still have arrived, so the parts after it go out too, and ^R
+        retries each ✗ in turn. A hard failure (the companion refuses the send) removes the
+        bubble, shows the error inline, and stops the parts after it. Their text goes back
+        in the compose line.
         """
+        sent = 0
         try:
-            message = await self._spin_while(self._send(pending.text))
-        except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
-            self._discard(pending)
-            self._status = f"send failed: {exc}"
-        else:
-            if message is not None:
+            for i, text in enumerate(cut):
+                self._sending_part(i + 1, len(cut))
+                pending = ChatMessage(text=text, outbound=True, created_at=utcnow())
+                self._messages.append(pending)
+                self._session.invalidate()
+                try:
+                    message = await self._spin_while(self._send(text))
+                except Exception:
+                    self._discard(pending)
+                    raise
+                if message is None:  # nothing went out (the contact was not restored)
+                    self._discard(pending)
+                    self._keep_unsent(cut, sent)
+                    break
+                sent += 1
                 self._swap(pending, message)
-            else:
-                self._discard(pending)
             self._status = ""
+        except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
+            self._status = f"send failed: {exc}"
+            self._keep_unsent(cut, sent)
         finally:
             self._sending = False
             self._stick = True
@@ -1517,6 +1585,8 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
         pages=await ContactPages.gather(ctx),
+        max_parts=ctx.preferences.message_parts_max,
+        part_gap_s=ctx.preferences.trace_cooldown_s,
     )
     ctx.chat.set_active(conversation.key)
 
