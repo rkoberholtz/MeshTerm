@@ -302,6 +302,19 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         default=DEFAULT_REACTIONS,
     ),
     PrefSpec(
+        key="message_parts_max",
+        label="Message parts",
+        help="Send a long message as this many parts at most",
+        group="Sending",
+        value_type="int",
+        # Each part is a transmission, and a channel part is a flood. Three parts hold
+        # about 370 bytes on a channel. With 1, MeshTerm never cuts a message, and a long
+        # message is refused as before. Refer to meshterm.core.parts.
+        default=3,
+        minimum=1,
+        maximum=9,
+    ),
+    PrefSpec(
         key="room_relogin_minutes",
         label="Room re-login",
         help="Opening a room this quiet logs in again",

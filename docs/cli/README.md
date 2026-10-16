@@ -1734,6 +1734,7 @@ flood_advert_cooldown_s      60                                    60           
 weekly_flood_advert          off                                   off                                   Flood an advert after a week without one
 advert_quiet_s               30                                    30                                    Silence to wait for before the weekly advert
 direct_message_soft_retries  0                                     0                                     Times to resend a message that gets no reply
+message_parts_max            3                                     3                                     Send a long message as this many parts at most
 tx_opt_min                   18                                    18                                    Weakest power it will try
 tx_opt_max                   28                                    28                                    Strongest power it will try
 tx_snr_tolerance_db          1                                     1                                     Signals this close are a tie, so less power wins
