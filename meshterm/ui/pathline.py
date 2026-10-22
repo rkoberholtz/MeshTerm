@@ -17,7 +17,7 @@ surface that the survey found can in the end use it.
   look, and each seam uses one cell. The label of the chip of a node has the hue that
   comes from its hash (:func:`~meshterm.ui.theme.node_style`). This is the colour that its
   name has on each surface. The fill is that hue, but darker (:data:`CHIP_LIGHTNESS`). Our
-  node is the yellow ``★`` of the map on a neutral dark grey. A faded hop is dark slate. A
+  node is the white ``★`` of the map on a neutral dark grey. A faded hop is dark grey. A
   keyless hop is light grey on grey. (On the 16-colour console of the PicoCalc, the fill
   is the dim twin of the hue. Refer to :func:`_slot_colours`.)
 
@@ -87,7 +87,7 @@ surface that the survey found can in the end use it.
   ``★`` of the app. The user already knows who both ends are, and the cells are for the
   hops that *are* news. These stars fade where the route is being *composed*, because our
   two ends are fixtures and not choices. A surface that only *shows* a walk passes
-  ``dim_self=False`` and keeps us in the ``you`` white.
+  ``dim_self=False`` and keeps our stars in the ``you`` white.
 
 The existing call sites still render through ``path_text``. A separate pass for each
 surface will move them here. The insertion cursor of the composer is a hop in its own
@@ -140,8 +140,9 @@ POWERLINE_ROUND_CLOSE = ""
 #: Our node, where a surface asks for it without its name and hash (``bare_self``): the
 #: ``★`` of the app. It is the map's own marker, taken from
 #: :data:`~meshterm.ui.marks.SELF_MARK`. Thus the star in a route and the star on the map
-#: can never be different, in glyph or in hue.
-SELF_GLYPH, _SELF_INK = SELF_MARK
+#: can never be different, in glyph or in colour: the white of ``you``.
+SELF_GLYPH = SELF_MARK[0]
+
 
 #: The insertion cursor of the composer. It stands in the route as a hop of its own: the
 #: empty slot into which the next chosen hop goes. It is a ``+``, because this is what
@@ -191,23 +192,33 @@ def _chip_label(fill: str) -> str:
     return oklab.to_hex(oklab.fitted((min(1.0, lightness / CHIP_LIGHTNESS), a, b)))
 
 
-#: The text of the composer's slot: near-black slate on the white chip.
-_CHIP_FG = "#0f172a"
+#: The text of the composer's slot: a grey that is almost black, on the white chip.
+_CHIP_FG = "#181818"
 #: The chip fill for a keyless hop: the ``faint`` grey. Colour is only for identities that
 #: have a key, in chips and in arrow mode.
-_KEYLESS_BG = "#64748b"
+_KEYLESS_BG = "#737373"
 #: The label of a keyless chip: the same pair as the chip of a node, in grey.
 _KEYLESS_FG = _chip_label(_KEYLESS_BG)
-#: The chip fill of our node: a neutral dark grey. Thus the yellow ``★`` on it reads as the
-#: marker of the map and not as the hue of a node (JP, 2026-08-09). It is *not* a colour
+#: The fill of a quiet chip (:attr:`PathHop.quiet`): the grey of plain text (``#cccccc``,
+#: the default foreground of Windows Terminal and of the terminal of VS Code), darker by
+#: the rule of the chip of a node (:data:`CHIP_LIGHTNESS`).
+_QUIET_BG = _chip_fill("#cccccc")
+#: The label of a quiet chip: black. A grey label on the grey fill read as a name that the
+#: chip still lit, and black reads as a name that it does not (JP, 2026-10-14).
+_QUIET_FG = "#000000"
+#: The label of our chip in a chat (:attr:`PathHop.white_ink`): white, on the fill that
+#: our hue gives each chip.
+_WHITE = "#ffffff"
+#: The chip fill of our node: a neutral dark grey. Thus the ``★`` on it reads as the
+#: marker of the map and not as a chip of a node (JP, 2026-08-09). It is *not* a colour
 #: of the spectrum on purpose, and it is not the white that it was before. Our end of a
 #: route is a fixture that the user already knows. It stays back and lets the hops that
 #: differ carry the colour.
-_YOU_BG = "#3f3f46"
-#: The chip of a dimmed hop: a dark slate fill with muted ink. It recedes like ``faint``
+_YOU_BG = "#404040"
+#: The chip of a dimmed hop: a dark grey fill with muted ink. It recedes like ``faint``
 #: text.
-_DIM_BG = "#334155"
-_DIM_FG = "#94a3b8"
+_DIM_BG = "#404040"
+_DIM_FG = "#a2a2a2"
 
 #: On the 16-colour console, the page: slot 0, black. It is the fill of a chip that the
 #: console cannot fill, because the VT has no dark grey background. That chip is our ``★``,
@@ -286,9 +297,9 @@ class PathHop:
             comes from the hash (its first byte, so each prefix gives the same hue).
             ``None`` renders muted and grey, because colour is only for identities that
             have a key.
-        you: Our node. Arrows draw it in the pure-white ``you`` style. Chips draw it in the
-            own yellow of the map on the neutral dark grey :data:`_YOU_BG`, with padding
-            like each other chip.
+        you: Our node. Arrows draw it in the pure-white ``you`` style. Chips draw the white
+            ``★`` on the neutral dark grey :data:`_YOU_BG`, with padding like each other
+            chip.
         annotation: The hash note for traces. It is rendered ``" (3d)"`` after the label in
             both modes (pass the bare ``3d``, without parentheses).
         lit_bytes: For a hash label: the leading *bytes* that are drawn in the hue (the two
@@ -309,6 +320,19 @@ class PathHop:
             continues again". A chip says the opposite: that a node in the route has the
             name ``⋯``. Arrow mode does not need a special case, because a bare label
             between two arrows is already the same thing.
+        white_ink: Draw the label in white, on the fill that the hue of ``key`` gives each
+            chip. It is our node in a chat (refer to :func:`~meshterm.ui.widgets.self_chip`):
+            the fill is the same as the fill of each known sender, and the white label
+            tells it from them (JP, 2026-10-14). Arrow mode draws the same pair, with the
+            padding of a chip. The PicoCalc draws it too, white on the dim twin of the hue.
+            On a quiet chip, it is a white label on the grey fill: a node with no key on the
+            selected message of a chat (refer to :func:`~meshterm.ui.widgets.picked_hop`).
+        quiet: A node with no key in a chat: a sender or a mention that nobody can
+            identify. Its chip is black on a grey fill (:data:`_QUIET_BG`), so it does not
+            stand out among the senders that have a colour (JP, 2026-10-14). A hop with a
+            key keeps its hue, and a route keeps the keyless chip. Arrow mode keeps the
+            ``node.unknown`` grey. The PicoCalc keeps the light grey fill of its keyless chip,
+            with the black label.
     """
 
     label: str
@@ -320,6 +344,8 @@ class PathHop:
     style: str | None = None
     cursor: bool = False
     gap: bool = False
+    white_ink: bool = False
+    quiet: bool = False
 
 
 def elision_hop() -> PathHop:
@@ -394,6 +420,31 @@ def _fills(line: Text) -> list[str | None]:
     return fills
 
 
+def _path_extent(line: Text, index: int) -> range | None:
+    """The characters of the path line in ``line`` that holds character ``index``.
+
+    Each path line stamps its own extent with :data:`PATH_INK` (refer to
+    :meth:`PathLine._render`). A row that appends a path carries the stamp as a span, and
+    the cells after it (a status, an age) are not path. A line whose base style is the
+    stamp is all path. So is a line with no stamp at all, because then nothing can say
+    where its path stops.
+
+    Returns:
+        The range of the characters of that path, or ``None`` when ``index`` is outside
+        each path of a stamped row.
+    """
+    whole = range(len(line.plain))
+    if str(line.style) == PATH_INK:
+        return whole
+    stamps = [span for span in line.spans if str(span.style) == PATH_INK]
+    if not stamps:
+        return whole
+    for span in stamps:
+        if span.start <= index < span.end:
+            return range(max(0, span.start), min(len(line.plain), span.end))
+    return None
+
+
 def _char_of_cell(plain: str, cell: int) -> int:
     """The index of the character in which a display cell falls, limited to the string."""
     if cell <= 0:
@@ -420,6 +471,12 @@ def cut_mark(line: Text, at: int, side: str) -> Text:
     seam or on the closing edge still cracks in the colour of the chip that the user can
     see, and not in nothing.
 
+    The scan stays inside the path that holds the cut (refer to :func:`_path_extent`). A
+    row can be a chip, then text: the recipient of a Courier entry, then what the entry
+    waits for. A cut in that text once found the chip far to its left, and drew a half
+    block in the fill of the chip at the right edge of the row, away from each chip. A cut
+    outside a path is a cut of text, so it gets the ellipsis.
+
     Args:
         line: The rendered line that MeshTerm cuts (whole, not shifted, with absolute cells).
         at: The index of the nearest *visible* cell on the side of the mark. For
@@ -435,7 +492,13 @@ def cut_mark(line: Text, at: int, side: str) -> Text:
     if not fills:  # there is nothing drawn to shear: a caller cut an empty line
         return Text(_ELLIPSIS, style="muted")
     index = _char_of_cell(line.plain, at)
-    steps = range(index, len(fills)) if side == ELIDE_HEAD else range(index, -1, -1)
+    extent = _path_extent(line, index)
+    if extent is None:  # the cut is in text after (or between) the paths of the row
+        return Text(_ELLIPSIS, style="muted")
+    if side == ELIDE_HEAD:
+        steps = range(index, extent.stop)
+    else:
+        steps = range(index, extent.start - 1, -1)
     fill = next((fills[i] for i in steps if fills[i]), None)
     if fill is None:
         return Text(_ELLIPSIS, style="muted")
@@ -1001,6 +1064,9 @@ class PathLine:
             text.append(hop.label, style="selected")
         elif hop.dim:
             text.append(hop.label, style="faint")
+        elif hop.white_ink and hop.key:
+            fill, ink, _soft = _colours_of(hop)
+            text.append(f" {hop.label} ", style=f"{_WEIGHT}{ink} on {fill}")
         elif hop.style:
             text.append(hop.label, style=hop.style)
         elif hop.you:
@@ -1161,9 +1227,9 @@ class PathLine:
         Each chip has padding on both sides, also the ``★`` (JP, 2026-08-09). The pads are
         not there to make room for a long *word*. They are the chip's own shape. A star
         that is squeezed between two chevrons reads as a glyph that is wedged into the seam,
-        and not as a segment of the route. The ink of our chip is the yellow of the map on
-        the neutral dark grey :data:`_YOU_BG`. Thus the star in the line and the star on the
-        map read as one mark.
+        and not as a segment of the route. The ink of our chip is the white of the star of
+        the map, on the neutral dark grey :data:`_YOU_BG`. Thus the star in the line and the
+        star on the map read as one mark.
 
         The colours come from the palette of the platform (:func:`_colours_of`).
         """
@@ -1199,8 +1265,12 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
     readable on it.) It is the only light chip on the ribbon. The fade is next, and it wins
     over the identity, also our own. A dimmed hop is a hop that nobody composed (an
     automatic return home, a mirrored return leg). Our end must recede with the rest of
-    that automatic half, and not keep its yellow among the greys. Plain mode says the same
+    that automatic half, and not keep its hue among the greys. Plain mode says the same
     thing when it fades the name.
+
+    Our chip in a chat (``white_ink``) has the fill of the chip of its key, and a white
+    label. A quiet chip (a node with no key in a chat) is black on a grey fill, or white on
+    it with ``white_ink``.
     """
     if hop.cursor:
         return _ChipColours(_style_hex("cursor") or _KEYLESS_BG, _CHIP_FG, _CHIP_FG)
@@ -1209,11 +1279,16 @@ def _spectrum_colours(hop: PathHop) -> _ChipColours:
         return _ChipColours(_chip_fill(resolved), resolved, resolved)
     if hop.dim:
         return _ChipColours(_DIM_BG, _DIM_FG, _DIM_FG)
-    if hop.you:
-        return _ChipColours(_YOU_BG, _SELF_INK, _SELF_INK)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
+    if hop.white_ink and hue:
+        return _ChipColours(_chip_fill(hue), _WHITE, _WHITE)
+    if hop.you:
+        return _ChipColours(_YOU_BG, _WHITE, _WHITE)
     if hue:
         return _ChipColours(_chip_fill(hue), hue, hue)
+    if hop.quiet:
+        ink = _WHITE if hop.white_ink else _QUIET_FG
+        return _ChipColours(_QUIET_BG, ink, ink)
     return _ChipColours(_KEYLESS_BG, _KEYLESS_FG, _KEYLESS_FG)
 
 
@@ -1229,10 +1304,14 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
 
     A keyless chip is white on light grey, the same pair one bank down. Our ``★``, a faded
     hop, and the slot of the composer have no fill of their own, because the console has no
-    dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the star in its
-    yellow, a faded hop in the dark grey, and the slot as a white ``+`` in a break of the
+    dark grey background. They stand on the page (:data:`_SLOT_PAGE`): the star in our
+    hue, a faded hop in the dark grey, and the slot as a white ``+`` in a break of the
     ribbon. The order of the rules is the same as on a truecolor terminal
     (:func:`_spectrum_colours`).
+
+    Our chip in a chat (``white_ink``) is white on the dim twin of its hue, the same rule as
+    on a truecolor terminal. A quiet chip is black on the light grey of the keyless chip, or
+    white on it with ``white_ink``.
     """
     if hop.cursor:
         return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
@@ -1245,9 +1324,14 @@ def _slot_colours(hop: PathHop) -> _ChipColours:
     if hop.dim:
         return _ChipColours(_SLOT_PAGE, _SLOT_FAINT, _SLOT_FAINT)
     if hop.you:
-        return _ChipColours(_SLOT_PAGE, _SELF_INK, _SELF_INK)
+        return _ChipColours(_SLOT_PAGE, _SLOT_WHITE, _SLOT_WHITE)
     hue = _style_hex(node_style(hop.key)) if hop.key else None
     ink = hue if hue in DIM_TWIN else _SLOT_WHITE
+    if hop.white_ink and hue:
+        return _ChipColours(DIM_TWIN[ink], _SLOT_WHITE, _SLOT_WHITE)
+    if hop.quiet and not hue:
+        label = _SLOT_WHITE if hop.white_ink else _SLOT_PAGE
+        return _ChipColours(DIM_TWIN[ink], label, label)
     return _ChipColours(DIM_TWIN[ink], ink, ink)
 
 

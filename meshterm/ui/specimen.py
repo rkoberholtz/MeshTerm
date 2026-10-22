@@ -20,13 +20,24 @@ from ..platforms import get_platform
 from .packet_viewer import KIND_ICONS, PAYLOAD_ICONS
 from .theme import _VT_SLOTS, fold_text, glyph, name_style, snr_style
 from .tui.fkeys import FPair, active_deck
-from .widgets import DESTINATION, ORIGIN, _recency_style, channel_glyph, name_chip
+from .widgets import (
+    ORIGIN,
+    _recency_style,
+    author_chip,
+    channel_glyph,
+    mention_chip,
+    name_chip,
+    self_chip,
+)
 
 #: Demonstration identities for the row of name colours: ``(name, key)``. The keys are
 #: synthetic. We chose them so that their first bytes are in three different sectors of
 #: the hue wheel. On the console, these are three different palette slots (refer to
 #: ``theme._NODE_SLOT_HEXES``).
 _DEMO_NAMES = (("Alice", "a1b2"), ("Lakeside", "3d63"), ("Lounge", "cc10"))
+
+#: The key of our own node in the specimen, which gives the hue of its chat chip.
+_DEMO_SELF_KEY = "5e7f"
 
 
 def _palette_row() -> Text:
@@ -133,20 +144,21 @@ def specimen_lines() -> list[RenderableType]:
 
     # The same names as chips, as the chat draws them. A sender label closes on the point,
     # because a message goes on from its author. The mention at the end opens on the
-    # notch, because the node that it names is where the message goes. The path line's
-    # own segment draws them, so this row is also a one-hop sample of the route language:
-    # the hue in the fill, the star for our end, and the keyless grey for a node that
-    # nobody can identify.
+    # notch, because the node that it names is where the message goes, and it has no ``@``.
+    # The path line's own segment draws them, so this row is also a one-hop sample of the
+    # route language: the hue in the fill, and black on grey for a node that nobody can
+    # identify. Our own messages go under ``★ me``, the one chip with a white label, on
+    # the fill of our hue.
     chips = Text("chips   ")
     for name, key in _DEMO_NAMES[:2]:
         chips.append_text(name_chip(name, key, role=ORIGIN))
         chips.append(" ")
-    chips.append_text(name_chip("", you=True, role=ORIGIN))
+    chips.append_text(self_chip("me", _DEMO_SELF_KEY, role=ORIGIN))
     chips.append(" ")
-    chips.append_text(name_chip("·", role=ORIGIN))
+    chips.append_text(author_chip("·", None))
     chips.append(" ")
     name, key = _DEMO_NAMES[2]
-    chips.append_text(name_chip(f"@{name}", key, role=DESTINATION))
+    chips.append_text(mention_chip(name, key))
     lines.append(chips)
 
     lines.append(Text("heard   ").append_text(_ages_row()))

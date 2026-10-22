@@ -25,7 +25,6 @@ platform.
 from __future__ import annotations
 
 import math
-from collections import Counter
 from dataclasses import dataclass, field
 from operator import itemgetter
 
@@ -34,7 +33,7 @@ from ..core.models import MapMarker
 from ..core.mvt import GEOM_LINE, GEOM_POLYGON, Layer
 from ..platforms import Platform, on_platform
 from .mapcanvas import MapCanvas, Raster
-from .marks import NODE_MARK, REPEATER_MARK, RGB, SELF_MARK, UNKNOWN_MARK, parse_hex
+from .marks import NODE_MARK, REPEATER_MARK, RGB, SELF_MARK, UNKNOWN_MARK
 from .theme import mark_rgb
 
 # The marker palette, shared across all the app. The canonical tuples are in ui.marks.
@@ -59,20 +58,20 @@ _ROAD_STYLE: dict[str, tuple[str, int]] = {
     "trunk": ("map.highway", 26),
     "primary": ("#e8b24a", 25),
     "secondary": ("#d7c257", 24),
-    "tertiary": ("#a7adb8", 23),
-    "minor": ("#828894", 21),
-    "unclassified": ("#828894", 21),
-    "residential": ("#828894", 21),
-    "living_street": ("#767c88", 20),
-    "service": ("#5f646e", 19),
-    "pedestrian": ("#5a5f69", 15),
-    "path": ("#4b5560", 12),
-    "track": ("#4b5560", 12),
-    "footway": ("#454e58", 11),
-    "cycleway": ("#455864", 12),
+    "tertiary": ("#adadad", 23),
+    "minor": ("#888888", 21),
+    "unclassified": ("#888888", 21),
+    "residential": ("#888888", 21),
+    "living_street": ("#7c7c7c", 20),
+    "service": ("#646464", 19),
+    "pedestrian": ("#5f5f5f", 15),
+    "path": ("#545454", 12),
+    "track": ("#545454", 12),
+    "footway": ("#4d4d4d", 11),
+    "cycleway": ("#555555", 12),
 }
-_ROAD_DEFAULT = ("#5f646e", 18)
-_RAIL = ("#8a8f98", 22)
+_ROAD_DEFAULT = ("#646464", 18)
+_RAIL = ("#8f8f8f", 22)
 
 # Waterway class -> (colour, priority).
 _WATERWAY_STYLE: dict[str, tuple[str, int]] = {
@@ -90,16 +89,16 @@ _GREEN_CLASSES = {"wood", "forest", "grass", "park", "meadow", "scrub", "wetland
 # with a lower rank get screen space first. The minimum zoom hides the fine detail until
 # you zoom in.
 _PLACE_STYLE: dict[str, tuple[str, bool, int, int]] = {
-    "city": ("#f8fafc", True, 0, 0),
-    "town": ("#e6ebf2", True, 1, 9),
-    "village": ("#cdd6e2", False, 2, 12),
-    "suburb": ("#9fb0c4", False, 3, 12),
-    "quarter": ("#94a5ba", False, 4, 13),
-    "neighbourhood": ("#8496ab", False, 5, 13),
-    "hamlet": ("#8496ab", False, 6, 14),
+    "city": ("#fafafa", True, 0, 0),
+    "town": ("#eaeaea", True, 1, 9),
+    "village": ("#d5d5d5", False, 2, 12),
+    "suburb": ("#aeaeae", False, 3, 12),
+    "quarter": ("#a3a3a3", False, 4, 13),
+    "neighbourhood": ("#949494", False, 5, 13),
+    "hamlet": ("#949494", False, 6, 14),
 }
 _WATER_LABEL = ("#7dd3fc", False, 2)
-_STREET_LABEL = ("#9aa0aa", False, 7)
+_STREET_LABEL = ("#9f9f9f", False, 7)
 
 #: The zoom at which street names appear. Below it, a canvas 53 cells wide cannot hold one
 #: name for each street. The few names that fit label a grid that is too coarse to show
@@ -126,7 +125,7 @@ _FILL_LAYERS = ("water", "landcover", "landuse", "park")
 #: Below the zoom gate, a typical footprint is approximately two dots wide (less than half
 #: a cell). Thus the full layer becomes a haze that makes the streets hard to read, and it
 #: shows nothing that the street pattern does not already show.
-_BUILDING_FILL = ("#4a4f5a", 8)
+_BUILDING_FILL = ("#4f4f4f", 8)
 _BUILDING_STIPPLE = 2
 _BUILDING_MIN_ZOOM = 15
 
@@ -759,30 +758,6 @@ def _marker_style(marker: MapMarker) -> tuple[str, str]:
     return _NODE
 
 
-#: The number of piled nodes at which the glyph of a marker gets full brightness.
-_PILE_FULL = 8
-
-
-def _pile_color(color: RGB, count: int, *, cap: int = _PILE_FULL) -> RGB:
-    """Make the colour of a marker brighter, by the number of nodes that share its cell.
-
-    One cell can show only one glyph. Thus, where many nodes are at the same position, the
-    map would hide the crowd behind one marker. Instead, we keep the glyph of the top node,
-    and move its colour toward white as the pile grows. Thus a bright marker shows a busy
-    cluster. The ramp is logarithmic (2 nodes → a clear increase, then saturation near
-    ``cap``). Thus it stays informative, and one extra node does not look like a crowd.
-    """
-    if count <= 1:
-        return color
-    t = min(1.0, math.log2(count) / math.log2(cap))
-    r, g, b = color
-    return (
-        round(r + (255 - r) * t),
-        round(g + (255 - g) * t),
-        round(b + (255 - b) * t),
-    )
-
-
 #: How much a node outside an active find filter dims (a multiplier for the glyph colour).
 _FIND_DIM = 0.35
 
@@ -801,9 +776,10 @@ def _draw_nodes(
     """Draw the mesh nodes on top: each glyph, then labels by importance until they collide.
 
     The glyphs are drawn lowest priority first, so that our node and the repeaters are on
-    top of the leaf nodes. Where several nodes share a cell, the glyph that stays is made
-    brighter by the pile size (:func:`_pile_color`). Thus crowded positions glow, and do
-    not silently hide the crowd. Then the labels are placed highest priority first (our
+    top of the leaf nodes. One cell shows one glyph, so where several nodes share a cell,
+    the glyph of the top node stays. (A crowd once made that glyph brighter. Each marker
+    is white now, and white cannot get brighter, so JP removed that signal on
+    2026-10-14.) Then the labels are placed highest priority first (our
     node, then repeaters, then leaf nodes), each only if it fits with no overlap. Thus, on
     a crowded map, the important labels get the available space, and the other nodes show
     as a bare marker (with no overlap).
@@ -823,23 +799,18 @@ def _draw_nodes(
         matched = not needle or needle in marker.label.casefold()
         placed.append((marker, ix, iy, matched))
 
-    # A cell is (dot_x >> 1, dot_y >> 2). Count how many nodes are in each cell.
-    pile = Counter((ix >> 1, iy >> 2) for _, ix, iy, _m in placed)
-
     # Matches draw after (over) the dimmed nodes that do not match, at any rank. Thus the
     # node that the user looks for is never hidden below a brighter neighbour.
     for marker, ix, iy, matched in sorted(placed, key=lambda p: (p[3], p[0]._rank())):
         glyph, color = _marker_style(marker)
-        rgb = parse_hex(color)
+        rgb = mark_rgb(color)
         if not matched:
             rgb = _dimmed(rgb, _FIND_DIM)
-        else:
-            rgb = _pile_color(rgb, pile[(ix >> 1, iy >> 2)])
         canvas.marker(ix, iy, glyph, rgb)
 
     # A node that the filter removes is context: a bare dim glyph with no label. Labels get
     # the name hue of the node, which comes from its key (the colour rule for all the app).
-    # The label of our node is the pure ``you`` white (the ★ glyph keeps its yellow). An
+    # The label of our node is the pure ``you`` white, the same as the ★ glyph. An
     # active find filter still makes the label of each match full white, so that the node
     # that the user looks for is easy to see.
     from .widgets import name_rgb  # widgets imports this module, so bind late to avoid the cycle

@@ -69,19 +69,23 @@ def recording_locator(markers: list) -> object:
     return locator
 
 
-def recording_pages(contacts: list) -> object:
+def recording_pages(contacts: list, *, store: object = None, self_key: str = "") -> object:
     """A real :class:`~meshterm.ui.node_detail_screen.ContactPages` whose pages are a list.
 
     It finds contacts with the rule of the app. Instead of a node page, :meth:`show` appends
-    the contact that the page would open on to ``shown`` (``None`` is our node).
+    the contact that the page would open on to ``shown`` (``None`` is our node). With a
+    contact ``store`` and the key of the device, ^K can lock the contacts too.
     """
+    from types import SimpleNamespace
+
     from meshterm.ui.node_detail_screen import ContactPages
 
     class _Recording(ContactPages):
         async def show(self, contact) -> None:  # noqa: ANN001 - a Contact, or None for us
             self.shown.append(contact)
 
-    pages = _Recording(None, contacts)  # type: ignore[arg-type]
+    ctx = None if store is None else SimpleNamespace(contact_store=store)
+    pages = _Recording(ctx, contacts, self_key=self_key)  # type: ignore[arg-type]
     pages.shown = []  # type: ignore[attr-defined]
     return pages
 
@@ -189,6 +193,23 @@ def _isolate_config_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[No
         os.environ.pop("MESHTERM_HOME", None)
     else:
         os.environ["MESHTERM_HOME"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _empty_registries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test starts with no registered secret and no registered host.
+
+    The two registries are process-wide on purpose: a secret that MeshTerm read once must
+    stay hidden for the rest of the run. In a suite, that means that a password one test
+    used ("hello", the default room password) hides the same word in each later test that
+    looks for it. ``monkeypatch`` puts the shared objects back after the test.
+    """
+    from meshterm.core import anonymize, secrets
+
+    monkeypatch.setattr(secrets, "_known", set())
+    monkeypatch.setattr(secrets, "_known_pattern", None)
+    monkeypatch.setattr(anonymize, "_hosts", {})
+    monkeypatch.setattr(anonymize, "_host_pattern", None)
 
 
 @pytest.fixture(autouse=True)

@@ -57,6 +57,7 @@ If you give no command, MeshTerm starts the interactive menu.
 | `--tcp HOST[:PORT]` | The network address of a TCP companion. It selects the TCP transport. The default port is 5000. |
 | `--spi` | The LoRa radio on the SPI bus of this machine. It selects the SPI transport. MeshTerm runs the node for the length of the command. If one radio is attached, MeshTerm uses that radio, with a profile or without one. If no radio is attached, MeshTerm uses the one SPI profile, or else the wiring of the uConsole AIO. If two radios are attached, MeshTerm refuses (exit `3`) and lists them. Select one with `-p`. Refer to [Adding a radio on the SPI bus](../guide/configuration.md#adding-a-radio-on-the-spi-bus). Linux only. |
 | `--mock` | Use the built-in simulator instead of real hardware. Nothing transmits, and the run records to `meshterm-mock.db` instead of your real history. |
+| `--demo` | Use the simulator in a demo mesh over Montréal: about forty invented nodes, a week of traffic, conversations, traces, and records. The demo has its own directory (`demo/` in the MeshTerm directory), and MeshTerm writes it again at each start. Thus each run starts from the same state, and your history never gets a node of the demo. It cannot take `--db`. |
 | `--db PATH` | Use this SQLite database instead of `~/.meshterm/meshterm.db` (or `meshterm-mock.db`, with `--mock`). **It moves the database and nothing else.** Refer to [Where MeshTerm keeps its state](#where-meshterm-keeps-its-state). |
 | `--json` | Print the answer as JSON instead of aligned text. |
 | `--absolute` | For this run, print times as ISO-8601 instants instead of relative ages. |
@@ -99,6 +100,7 @@ radios from two directories in the same shell.
 | --- | --- |
 | `meshterm.db` | The history: each packet that MeshTerm heard, each trace that it walked, and each message. **This is the one file that `--db` moves.** |
 | `meshterm-mock.db` | The same history for the simulator. A `--mock` run records here when the run does not name a database. The file is absent until you do a `--mock` run. |
+| `demo/` | The directory of the demo (`--demo`). MeshTerm writes everything in it again at each start of the demo, except the tile cache of the map and the log. |
 | `config.toml` | The setup of the machine: device profiles, and where the database is. You write this file. MeshTerm only reads it. |
 | `preferences.toml` | Your overrides of the behaviour of MeshTerm. It lists only what you changed. |
 | `courier.json` | The outbox: queued messages, both waiting and finished. |
@@ -112,6 +114,14 @@ radios from two directories in the same shell.
 | `tilecache/` | The basemap tiles that MeshTerm downloaded. |
 | `meshterm.log` | The log file. |
 | `.lock` | The lock for a single instance. |
+
+**No log keeps a password or a secret.** The log file, the run log in the database (the
+arguments and the result of each command), and the remote command history of
+`remote.json` write `<secret>` in the place of a password, a channel secret, a pairing
+PIN, or a private key. This is always true, at each log level and with or without the
+**Anonymize** preference. The history keeps `password ` without its value, so ↑ still
+recalls the start of the command. `admin.json` keeps the admin passwords that you asked
+MeshTerm to remember, because that is its purpose.
 
 **`--db` alone does not isolate a run.** It moves the database. The database is most of
 the data, but it does not hold the identity. The contact caches, the channel caches, the
@@ -1735,6 +1745,7 @@ weekly_flood_advert          off                                   off          
 advert_quiet_s               30                                    30                                    Silence to wait for before the weekly advert
 direct_message_soft_retries  0                                     0                                     Times to resend a message that gets no reply
 message_parts_max            3                                     3                                     Send a long message as this many parts at most
+room_relogin_minutes         30                                    30                                    Opening a room this quiet logs in again
 tx_opt_min                   18                                    18                                    Weakest power it will try
 tx_opt_max                   28                                    28                                    Strongest power it will try
 tx_snr_tolerance_db          1                                     1                                     Signals this close are a tie, so less power wins
@@ -1752,7 +1763,9 @@ color_depth                  auto                                  auto         
 console_setup                auto                                  auto                                  Move to a better terminal when this console can't draw MeshTerm
 console_font                 6x12                                  6x12                                  Bigger text, or more rows on the handheld's panel
 name_overlap_days            7                                     7                                     Grey a name two nodes used within this many days
+section_spacing_min_rows     24                                    24                                    A blank line between sections and between chat authors
 log_level                    WARNING                               WARNING                               How much MeshTerm writes to its log file (next launch)
+anonymize                    off                                   off                                   Mask the home folder and addresses in the log and diagnostics
 ```
 
 **`DESCRIPTION`** says what each preference does, because the name of a key does not give
@@ -1801,7 +1814,7 @@ code beside each link. The scripted face prints only the link.
 **`--json`:**
 
 ```json
-{"page":"discord","title":"Join Discord","version":"0.11.1","text":"Join the Discord\n  Questions, ideas, bug reports, and mesh talk.\n\n  • https://discord.gg/AZwe5Uvb3S","links":["https://discord.gg/AZwe5Uvb3S"]}
+{"page":"discord","title":"Join Discord","version":"0.11.5","text":"Join the Discord\n  Questions, ideas, bug reports, and mesh talk.\n\n  • https://discord.gg/AZwe5Uvb3S","links":["https://discord.gg/AZwe5Uvb3S"]}
 ```
 
 | Field | Type | Meaning |
@@ -1865,6 +1878,7 @@ tx_power_dbm    20
 error           -
 
 config_dir   C:\Users\you\.meshterm
+anonymized   no
 db_size_kb   41280
 log_level    DEBUG
 log_size_kb  96
@@ -1916,6 +1930,29 @@ public without reading it. `tests/test_diagnostics.py` plants real secrets in ea
 that holds one. It fails if one of them, or a field that is only *named* like one,
 reaches either face.
 
+**`--anonymize` masks the personal details, and keeps a tidbit of each one.** Some facts
+are not secrets, but they are about you and your machine: the home folder in
+`config_dir`, which has your account name, and the address of a radio or a host that an
+`error` can repeat. `--anonymize` masks them in the way that a card number prints as
+`51xx xxxx xxxx 4571`:
+
+| Detail | As it is | Masked |
+| --- | --- | --- |
+| The account name in a home folder | `C:\Users\jpmartineau` | `C:\Users\j*********u` |
+| A Bluetooth address | `DA:C5:21:6B:7C:7C` | `DA:xx:xx:xx:7C:7C` |
+| An IPv4 address | `192.168.0.180` | `192.xxx.x.180` |
+| The name of a network companion | `meshcore.local` | `m******e.local` |
+
+Each masked value keeps its first and its last characters, and its length. Thus two radios
+in one report stay two different radios, and a maintainer can match the address in the
+report with the address in the log. The `anonymized` fact says which form the report is.
+
+The **Anonymize** preference (`meshterm preferences set anonymize on`) makes the masked
+report the default, and `--no-anonymize` overrides it for one run. The preference also
+masks the log file, `meshterm.log`, as MeshTerm writes each line, so you can attach the
+log with the report. A line that MeshTerm wrote before you turned the preference on stays
+as it is. Node names, message text, and keys are not masked.
+
 With `--json`, the five blocks of facts merge into one flat object, and the two listings
 keep a key of their own:
 
@@ -1950,6 +1987,11 @@ slot of the lane names it. The body of the page never names it, because the body
 to the report. The save writes `meshterm-diagnostics.md` into the config directory beside
 the log, and it answers in a dialog that names the path. If the write fails, the same
 dialog says so, in red, and the page stays readable.
+
+`a` changes the page between the report as it is and the anonymized report, and the title
+says `Diagnostics · anonymized` while the masks are visible. The page opens in the form
+that the **Anonymize** preference gives, and `s` saves the form that you see. On the
+PicoCalc, the key is **Shift+F3**, behind `Save`.
 
 #### `meshterm platform`
 

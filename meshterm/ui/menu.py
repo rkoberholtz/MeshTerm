@@ -348,7 +348,12 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
 
     if "device" in atoms:
         device = Text()
-        if ctx.mock:
+        if getattr(ctx, "demo", False):
+            # The demo shows the name of its node, as a real session does, and says that
+            # it is the demo where a real session says how the device is connected.
+            device.append(_demo_name())
+            device.append(" (demo)", style="muted")
+        elif ctx.mock:
             device.append("simulator", style="warn")
         else:
             name, where = _device_label(ctx, cache)
@@ -373,6 +378,13 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
             badge.append(f" {alerts}", style="warn")
             segments.append(badge)
     return segments
+
+
+def _demo_name() -> str:
+    """The name of our node in the demo world."""
+    from ..demo.world import SELF
+
+    return SELF.name
 
 
 def _device_label(ctx: AppContext, cache: dict) -> tuple[str, str]:
@@ -1292,9 +1304,11 @@ async def _wait_for_disconnect(ctx: AppContext) -> None:
     (:meth:`AppContext.link_alive`), and does not wait for a failed command. After a
     serial disconnect, the ``meshcore`` client continues to give cached data and never
     raises an error (this was confirmed on hardware). Thus an active liveness check is the
-    only reliable way to find a disconnected cable. The same check covers Bluetooth:
-    there, it reads the connection flag of the BLE client (which changes immediately when
-    the peripheral disconnects or goes out of range). The function never resolves for the
+    only reliable way to find a disconnected cable. The check also reads the connection
+    flag of the ``meshcore`` client, which changes immediately when the transport closes.
+    For Bluetooth, that flag is the only signal (the peripheral disconnects or goes out of
+    range). For serial, it finds a port that stays listed after its link is dead (a laptop
+    that wakes from sleep can hang up the port). The function never resolves for the
     simulator (it cannot be disconnected), or before a real device opens.
 
     Args:

@@ -27,22 +27,25 @@ run MeshTerm, the more the history of your mesh is worth.
 > change something, first say hello on [Discord](https://discord.gg/AZwe5Uvb3S).
 > [Read more about how the project is run](#how-this-project-is-run).
 
-https://github.com/user-attachments/assets/f91a6695-14d5-4ae0-8fdc-e65492d0955d
+https://github.com/user-attachments/assets/9921c756-c096-4224-9560-bb6180d895c8
 
-<p align="center"><sub>A video of less than two minutes, made on a real mesh.</sub></p>
+<p align="center"><sub>A video of less than two minutes, in the demo mesh over Montréal (<code>meshterm --demo</code>).</sub></p>
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="The dashboard: a timeline of the packets for each minute over the last two hours, and a count for each class of packet" width="49%">
-  <img src="docs/screenshots/map.png" alt="The map: repeaters with their names, on an OpenStreetMap basemap of the Lachine Canal" width="49%">
+  <img src="docs/screenshots/terminal/menu.png" alt="The main menu: the tools in groups (Message, Watch, Explore), and a header that shows one unread message and three alerts" width="49%">
+  <img src="docs/screenshots/terminal/chat.png" alt="The chat on the Public channel: each sender in a chip of the colour of their key, with the time and the SNR of each message" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screenshots/trace.png" alt="A trace: the route that the trace went through, drawn as chips, then the SNR of each hop" width="49%">
-  <img src="docs/screenshots/path.png" alt="Message paths: each route over which a channel message was heard, drawn on the map" width="49%">
+  <img src="docs/screenshots/terminal/paths.png" alt="Message paths: the five paths on which one channel message arrived, drawn as a graph and as chips" width="49%">
+  <img src="docs/screenshots/terminal/map.png" alt="The map: the nodes of the demo mesh over Montréal, with their names, on an OpenStreetMap basemap" width="49%">
 </p>
 <p align="center">
   <img src="docs/screenshots/picocalc.png" alt="MeshTerm on the PicoCalc, a console that is 53 columns wide, with a radio installed inside it" width="38%">
 </p>
-<p align="center"><sub>The dashboard, the map, a trace, the paths of a message, and the whole app on a PicoCalc.</sub></p>
+<p align="center">
+  <img src="docs/screenshots/cardputer-zero.png" alt="MeshTerm on the display of a Cardputer Zero: the wordmark, then the list of devices, with the Cap LoRa-1262 at the top" width="60%">
+</p>
+<p align="center"><sub>The main menu, the chat, the paths of a message, and the map, in the demo mesh over Montréal (<code>meshterm --demo</code>). Then the whole app on a PicoCalc, and the start screen on a Cardputer Zero.</sub></p>
 
 ---
 
@@ -198,6 +201,7 @@ mesh. You can look at the app before you buy anything.
 ### On the Cardputer Zero
 
 Install MeshTerm from M5Stack's app store on the handheld. Its share code is `MTRM`.
+MeshTerm works on both models, the Cardputer Zero and the Cardputer Zero Lite.
 [MeshTerm on the Cardputer Zero](docs/devices/cardputer-zero.md) has the details.
 
 ### Coming
@@ -248,6 +252,10 @@ meshterm --mock
 # custom console font, and an F-key hint lane. Preview it anywhere, or inspect it:
 meshterm --mock --platform picocalc-lyra
 meshterm specimen
+
+# On a Cardputer Zero, MeshTerm draws its 53×14 display itself. See that display in a
+# window of its own (download its font once with `meshterm emulate --fetch-fonts`):
+meshterm emulate cardputer-zero --mock
 ```
 
 MeshTerm has its own manuals for handhelds. **[MeshTerm on the

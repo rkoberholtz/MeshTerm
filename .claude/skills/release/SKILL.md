@@ -135,10 +135,36 @@ alias to the gather step instead.
 What *does* still carry the number: `docs/cli/README.md` has a sample document with a `"version"`
 field, which is the live `{version}` placeholder and must show the new one.
 
+### The screenshots and the video — made again, after the bump
+
+Every release refreshes the screenshots (JP, 2026-10-16: "make it so the images are
+automatically updated when we release") and the website's demo video (JP, 2026-10-17).
+Both show the version in their header, so they run **after** `__version__` changes and
+before the commit: follow the **`website-media` skill in release mode**. It runs
+`scripts/screenshots.py` (~1 min) then `scripts/video.py` (~4 min), and says what to look
+at before anything is committed.
+
+The two land in different repositories:
+
+- The screenshots (`docs/screenshots/`) ride in the release commit, so the tag carries
+  them and the `website` job builds meshterm.net from them. So does `README.md`, whose
+  video line `scripts/video.py --readme` points at the new upload.
+- The video, its poster, and its play card go to the site checkout beside this one
+  (`../meshterm.net/src/`) and get a commit there ("The demo video of MeshTerm X.Y.Z"). The
+  `website` job builds from the site's `main`, so that commit is **pushed before the tag**
+  (step 5).
+
+If either fails, stop and fix it, or ask JP whether to release with last release's
+images and video — don't commit a half-written set.
+
 ## 5. Commit, tag, push
 
+Stage by name, not with `-a`: other sessions work in the same tree, and `-a` would sweep
+their unfinished edits into the release.
+
 ```
-git commit -a -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
+git add CHANGELOG.md meshterm/__init__.py docs/cli/README.md docs/screenshots README.md
+git commit -m "MeshTerm X.Y.Z" -m "Co-Authored-By: <the model running this skill> <noreply@anthropic.com>"
 git tag -a vX.Y.Z -m "MeshTerm X.Y.Z"
 ```
 
@@ -149,11 +175,16 @@ hardcoded one. Seven release commits (0.3.1 through 0.10.0) went out without it 
 this line used to omit it.
 
 Commit on `main` — never a topic branch. Then **confirm with JP before pushing**, because
-the push is the act that builds and publishes the release:
+the push is the act that builds and publishes the release. The site goes first, so the
+`website` job finds the new video on its `main`:
 
 ```
+git -C ../meshterm.net push origin main
 git push origin main && git push origin vX.Y.Z
 ```
+
+The one confirmation covers both pushes: say that the site push carries the new video
+(and any other site commits that are ahead of origin, by subject) when you ask.
 
 This is the one workflow where pushing is expected. It is still asked for, once, in that
 moment — the standing rule against unasked pushes is not suspended by the skill, it is
@@ -167,19 +198,28 @@ gh release view vX.Y.Z
 ```
 
 Five platform builds, the release job, and `website` — which rebuilds meshterm.net from the
-tag so the site shows the new version — so it takes a few minutes. If only `website` fails,
+tag so the site shows the new version, the screenshots, and the video of step 4 — so it
+takes a few minutes. Once `website` has pushed its "MeshTerm X.Y.Z" commit, bring the
+local site up to date: `git -C ../meshterm.net pull --ff-only`. `website` runs the site repo's own `build.py`, so a change to the site's sources
+must be pushed to `meshterm.net` before the tag, or the job builds with the old ones. If only `website` fails,
 the release itself is fine (it runs after publishing); the usual cause is the
 `SITE_DEPLOY_KEY` secret, and once that is fixed `gh run rerun <run-id> --failed` finishes
 it.
 
 `store` also runs after publishing, so its failure leaves the release fine too. It opens a
 pull request on `CardputerZero/packages` (from JP's fork), and the store merges an update
-by itself once its own check passes — no video after the first release. Confirm the PR
-exists and its check passed:
+by itself once its own check passes — no video after the first release. **The store is
+part of every release** (JP, 2026-10-14: "when we release, include the Cardputer Zero App
+Store"), so a release is not done until that PR is merged. Confirm the PR exists, its
+check passed, and it merged:
 
 ```
 gh pr list -R CardputerZero/packages --author jpmartineau --state all --limit 3
 ```
+
+If it is still open, wait for the store's check (`gh pr checks <n> -R
+CardputerZero/packages --watch`). A failed check is a release problem to fix, not a note
+to leave for later.
 
 If `store` failed, the usual causes are the `CARDPUTER_STORE_TOKEN` secret (missing, or the
 token revoked) or a change in czdev: the job pins AppBuilder to one commit because
@@ -232,9 +272,15 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
   the headline items only, not every line;
 - the release link, and one line on how to get it (the download page, or the README's
   install line for someone who installed that way);
+- one line for Cardputer Zero owners: the update is in M5Stack's app store on the device.
+  Say so only once the store PR has merged; while it is open, say it reaches the store
+  soon;
+- right under the download link, a kind ask for a star on GitHub, opening on ⭐, with
+  the reason in a few words: stars give the project credibility and visibility, so more
+  MeshCore users find it;
 - Discord markdown only (`**bold**`, `- ` bullets, bare links); no headings, no tables,
-  no emoji beyond one at the start if it fits. Well under Discord's 2000 characters —
-  it should fit on a phone screen.
+  no emoji beyond one at the start if it fits and the star line's ⭐. Well under
+  Discord's 2000 characters — it should fit on a phone screen.
 
 ```
 **MeshTerm 0.10.1 is out**: three small command-line fixes.
@@ -244,6 +290,8 @@ the server, in plain words (they use MeshTerm; they don't read the diff):
 - `platform --help` and `specimen --help` read like the rest
 
 Download: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.1
+Cardputer Zero: update MeshTerm from the app store on the device.
+⭐ If you enjoy MeshTerm, please star it on GitHub: https://github.com/jpmartineau/MeshTerm. Every star gives the project more credibility and helps other MeshCore users find it. Thank you!
 ```
 
 Say who it was written for, then show it last in the reply, so it's the easiest thing to

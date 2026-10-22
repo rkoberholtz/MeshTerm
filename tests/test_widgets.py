@@ -8,6 +8,7 @@ time, each caller gets the correct output.
 
 from __future__ import annotations
 
+import pytest
 from rich.style import Style
 from rich.text import Text
 
@@ -28,10 +29,14 @@ from meshterm.ui.widgets import (
     format_age,
     format_ago,
     hop_chip,
+    mention_chip,
+    mention_hop,
+    mention_mark,
     name_chip,
     path_text,
     revisit_note,
     route_ends,
+    self_chip,
 )
 
 
@@ -266,8 +271,8 @@ def test_name_rgb_keyless_lands_on_the_muted_grey() -> None:
     """The raster twin: the RGB of a keyless name is the muted grey, and never a crash."""
     from meshterm.ui.widgets import name_rgb
 
-    assert name_rgb("Stranger") == (148, 163, 184)
-    assert name_rgb("Alice", "d4" + "0" * 62) != (148, 163, 184)
+    assert name_rgb("Stranger") == (162, 162, 162)
+    assert name_rgb("Alice", "d4" + "0" * 62) != (162, 162, 162)
 
 
 def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
@@ -289,7 +294,7 @@ def test_route_graph_source_label_takes_its_resolved_keys_hue() -> None:
         self_name="us",
         source="Alice",
     )
-    assert rgb_unknown(SRC_NODE) == (148, 163, 184)  # an origin that cannot be resolved stays muted
+    assert rgb_unknown(SRC_NODE) == (162, 162, 162)  # an origin that cannot be resolved stays muted
 
 
 def test_revisit_note_names_the_repeats_and_refuses_to_guess_why() -> None:
@@ -345,7 +350,81 @@ def test_name_chip_draws_us_as_the_star_never_as_our_name(powerline) -> None:
     chip = name_chip("you", you=True)
 
     assert "★" in chip.plain and "you" not in chip.plain
-    assert _span_style(chip, "★").bgcolor.name == "#3f3f46"  # a neutral grey, not a hue
+    assert _span_style(chip, "★").bgcolor.name == "#404040"  # a neutral grey, not a hue
+
+
+def test_self_chip_is_white_on_the_fill_of_our_key(powerline) -> None:
+    """In a chat, our messages go under ``★ Name``: white on the fill of each known sender.
+
+    The fill is the fill that our hue gives each chip, and the white label tells our chip
+    from the other senders, whose label is their hue (JP, 2026-10-14).
+    """
+    powerline(True)
+    ours = self_chip("Me", "5e7f", role=ORIGIN)
+    theirs = name_chip("Me", "5e7f", role=ORIGIN)
+
+    assert "★ Me" in ours.plain  # the star in the chip, in the white of the label
+    ink, normal = _span_style(ours, "★ Me"), _span_style(theirs, "Me")
+    assert ink.bgcolor.name == normal.bgcolor.name
+    assert ink.color.name == "#ffffff"
+
+
+def test_self_chip_is_a_padded_block_without_powerline(powerline) -> None:
+    """With no chips, our name is the same pair, padded as a chip is."""
+    powerline(True)
+    fill = _span_style(self_chip("Me", "5e7f"), "★ Me").bgcolor.name
+    powerline(False)
+    chip = self_chip("Me", "5e7f")
+
+    assert chip.plain == " ★ Me "
+    style = _span_style(chip, " ★ Me ")
+    assert (style.color.name, style.bgcolor.name) == ("#ffffff", fill)
+
+
+def test_a_mention_chip_has_no_at_and_arrow_mode_keeps_it(powerline) -> None:
+    """The chip says that a name is a mention. Without a chip, the ``@`` says it."""
+    powerline(True)
+    chip = mention_chip("Bob", "d4")
+    assert "@" not in chip.plain and chip.plain.startswith(POWERLINE_SEP)  # the notch
+    assert " Bob " in chip.plain
+    powerline(False)
+    assert mention_chip("Bob", "d4").plain == "@Bob"
+
+
+def test_a_mention_of_us_is_white_with_no_star(powerline) -> None:
+    """A mention of our name has the white label on the fill of our key, and no star in it."""
+    powerline(True)
+    ours = mention_chip("Me", "5e7f", you=True)
+    theirs = mention_chip("Me", "5e7f")
+
+    assert "★" not in ours.plain
+    ink, normal = _span_style(ours, "Me"), _span_style(theirs, "Me")
+    assert (ink.color.name, ink.bgcolor.name) == ("#ffffff", normal.bgcolor.name)
+    assert not mention_hop("Me", None, you=True).white_ink  # no key: no hue for the fill
+
+
+@pytest.mark.parametrize("chips", [True, False])
+def test_the_mark_of_a_message_that_names_us_is_our_star(powerline, chips) -> None:
+    """The white ``★`` of our node, with chips or without them."""
+    powerline(chips)
+    mark = mention_mark("5e7f")
+    assert mark.plain == "★" and str(mark.style) == "you"
+    assert str(mention_mark(None).style) == "node.unknown"  # no key: the keyless grey
+
+
+def test_our_star_is_white_on_the_map() -> None:
+    """The map marker of our node is the white of ``you`` (JP, 2026-10-14)."""
+    from meshterm.ui.widgets import self_marker
+
+    assert self_marker() == ("★", (0xFF, 0xFF, 0xFF))
+
+
+def test_self_chip_keeps_the_bare_star_without_our_name_or_key(powerline) -> None:
+    """A device that did not report our name or key leaves the star of a route."""
+    powerline(True)
+    star = name_chip("", you=True).plain
+    assert self_chip(None, "5e7f").plain == star
+    assert self_chip("Me", None).plain == star
 
 
 def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
@@ -353,7 +432,45 @@ def test_name_chip_greys_a_node_it_cannot_place(powerline) -> None:
     powerline(True)
     keyless = name_chip("·")
 
-    assert _span_style(keyless, "·").bgcolor.name == "#64748b"  # the keyless grey
+    assert _span_style(keyless, "·").bgcolor.name == "#737373"  # the keyless grey
+
+
+def test_a_chat_chip_with_no_key_is_black_on_grey(powerline) -> None:
+    """In a chat, an unknown sender or mention is black on a grey fill.
+
+    The fill is the grey of plain text, darker by the rule of the chip of a node. A node
+    with a key keeps its hue, and arrow mode keeps the ``node.unknown`` grey.
+    """
+    from meshterm.ui.pathline import _chip_fill
+    from meshterm.ui.widgets import author_chip
+
+    powerline(True)
+    for chip, label in ((author_chip("Zed", None), "Zed"), (mention_chip("Zed", None), "Zed")):
+        style = _span_style(chip, label)
+        assert (style.color.name, style.bgcolor.name) == ("#000000", _chip_fill("#cccccc"))
+    keyed = _span_style(author_chip("Bob", "d4"), "Bob")
+    assert keyed.color.name == node_style("d4").split()[-1]  # a key keeps its hue
+    powerline(False)
+    assert str(author_chip("Zed", None).spans[0].style) == "node.unknown"
+
+
+def test_a_chat_chip_with_no_key_is_black_on_the_keyless_fill_on_the_picocalc(
+    powerline,
+) -> None:
+    """The PicoCalc keeps the light grey fill of its keyless chip, with the black label."""
+    from meshterm.platforms import PICOCALC_LYRA, REGULAR, set_platform
+    from meshterm.ui.theme import slot_hex
+    from meshterm.ui.widgets import author_chip
+
+    powerline(True)
+    set_platform(PICOCALC_LYRA)
+    try:
+        quiet = _span_style(author_chip("Zed", None), "Zed")
+        keyless = _span_style(name_chip("Zed"), "Zed")
+        assert quiet.bgcolor == keyless.bgcolor
+        assert quiet.color.name == slot_hex(0)  # black
+    finally:
+        set_platform(REGULAR)
 
 
 def test_name_chip_of_an_origin_closes_on_the_point(powerline) -> None:

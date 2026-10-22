@@ -59,8 +59,8 @@ def test_theme16_bold_never_jumps_a_dim_slot_to_an_unrelated_bright_one() -> Non
     """The VT draws bold as brightness: bold on slots 0-7 becomes slot N+8.
 
     Slots 5 and 6 have meanings, and their bright partners have different meanings here
-    (5 purple is the repeater mark, and 13 pink is the node mark. 6 cyan is hint.brand,
-    and 14 is brand). Thus no style can combine bold with them.
+    (5 purple is the chip fill under a pink name, and 13 pink is a node hue. 6 cyan is
+    hint.brand, and 14 is brand). Thus no style can combine bold with them.
     """
     for name, style in _our_styles(MESH_THEME_16).items():
         if style.bold and style.color is not None and style.color.number in (5, 6):
@@ -245,9 +245,9 @@ def test_fold_keeps_ansi_sequences_intact() -> None:
 def test_fold_quantizes_embedded_truecolor_to_the_slots() -> None:
     """Truecolour from the canvas (the braille rasters) goes to the nearest palette slot."""
     set_platform(PICOCALC_LYRA)
-    folded = fold_text("\x1b[38;2;148;163;184m○\x1b[0m")
+    folded = fold_text("\x1b[38;2;162;162;162m○\x1b[0m")
     assert "38;2;" not in folded
-    # #94a3b8 → the nearest stock slot is 7 (#aaaaaa). A slot in the dim bank states its
+    # #a2a2a2 → the nearest stock slot is 7 (#aaaaaa). A slot in the dim bank states its
     # intensity.
     assert "\x1b[22;37m" in folded
     background = fold_text("\x1b[48;2;94;234;212mX\x1b[0m")
@@ -348,13 +348,16 @@ def test_route_graph_resolves_a_named_marker_colour_to_rgb() -> None:
         assert label_rgb_of("3d63") == theme.mark_rgb("type.repeater"), platform.name
 
 
-def test_node_type_marks_stay_distinct_on_the_console() -> None:
-    """Each type mark has its own slot. A naive downsample makes the repeater violet grey."""
-    set_platform(PICOCALC_LYRA)
+def test_node_type_marks_are_white_on_both_platforms() -> None:
+    """Each type mark is white, and the shape tells the type (JP, 2026-10-14).
+
+    The white is not the grey of a node that MeshTerm cannot identify.
+    """
     marks = ("type.node", "type.repeater", "type.room", "type.sensor")
-    rgbs = [theme.mark_rgb(name) for name in marks]
-    assert len(set(rgbs)) == len(marks)
-    assert theme.mark_rgb("type.repeater") != theme.mark_rgb("muted")
+    for platform in (REGULAR, PICOCALC_LYRA):
+        set_platform(platform)
+        assert {theme.mark_rgb(name) for name in marks} == {(255, 255, 255)}, platform.name
+        assert theme.mark_rgb("type.repeater") != theme.mark_rgb("node.unknown")
 
 
 def test_heat_ladder_walks_jps_seven_slots_in_order() -> None:
@@ -397,7 +400,7 @@ def test_canvas_drops_emphasis_where_bold_means_brightness() -> None:
     for platform, expect_bold in ((REGULAR, True), (PICOCALC_LYRA, False)):
         set_platform(platform)
         canvas = MapCanvas(6, 1)
-        canvas.marker(0, 0, "x", (148, 163, 184))  # markers always draw in bold
+        canvas.marker(0, 0, "x", (162, 162, 162))  # markers always draw in bold
         rendered = "".join(canvas.to_ansi_lines())
         assert ("\x1b[1m" in rendered) is expect_bold, (platform.name, repr(rendered))
     # The colour that the canvas received stays the same: a slot in the dim bank with its

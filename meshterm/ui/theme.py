@@ -29,18 +29,26 @@ MESH_THEME = Theme(
     {
         "brand": "bold #5eead4",
         "accent": "bold #818cf8",
+        # The border of each panel and dialog that has no caution tier: the base frame, a
+        # floating dialog, the title bar of a handheld, and a tab strip. It is the grey of
+        # ``muted``, and not a hue. A border is chrome, and a blue border was one more colour
+        # on each screen that had no meaning (JP, 2026-10-14). The two caution tiers keep
+        # their colours, because there the colour is the meaning: ``warn`` (amber) and
+        # ``err`` (red). It is darker than ``muted``, so the frame stays behind the text that
+        # it holds. JP chose it between #a2a2a2 (too light) and #7c7c7c (too dark).
+        "border": "#8f8f8f",
         # The only reverse-video chip: the committing button of a dialog, the Abort of a
         # running action, and the insertion slot of the composer where no chip fill carries
         # it. It is a *grey* block, and the ink of the page shows through it. It was cyan
         # before. That cyan was the teal of the wordmark with a third job (identity, a
         # node hue, and now a selection). A chip is chrome. It shows where a press lands,
-        # and it does not claim a colour. The slate is the slate of ``muted``. It is light
+        # and it does not claim a colour. The grey is the grey of ``muted``. It is light
         # enough that the reversed ink reads on it, in any background of the terminal. It
         # must be a *single* theme name. Rich removes without a message a style string that
         # mixes a theme name with an attribute (for example "reverse muted" renders as plain
         # text). Thus the reverse is part of the definition here, and the call site does
         # not add it.
-        "selected": "reverse bold #94a3b8",
+        "selected": "reverse bold #a2a2a2",
         # The only ink for "this is the one that the user selected". It is the row that the
         # ❯ points at, in each select list and in each screen that draws its own rows
         # (feed, routes, records, walk, composer). It is also the lit column heading one
@@ -79,6 +87,11 @@ MESH_THEME = Theme(
         # of the node hues on purpose (refer to node_style). Thus the user can always find
         # "you" easily.
         "you": "bold #ffffff",
+        # The text that the user types in the compose line of a chat: pure white, not bold.
+        # It is more visible than the transcript above it (JP, 2026-10-13). The ``›`` in
+        # front of it has the ``cursor`` white, the same as the ``❯`` of a selected
+        # message.
+        "compose": "#ffffff",
         # The name of a confirmed companion on the picker for the startup device: pure
         # white. Thus the devices that we talked to before are more visible than the ports
         # that MeshTerm only detected.
@@ -100,7 +113,7 @@ MESH_THEME = Theme(
         "ok": "bold #4ade80",
         "warn": "bold #fbbf24",
         "err": "bold #f87171",
-        "muted": "#94a3b8",
+        "muted": "#a2a2a2",
         # A node that MeshTerm cannot identify: its ``○`` ring, and its label where a bare
         # key or hash is the name (refer to the return of name_style when there is no key).
         # It has its own name and does not use ``muted``, because the two styles must not
@@ -108,13 +121,13 @@ MESH_THEME = Theme(
         # text. An unidentified node is *content* on which the user can still act. On the
         # console this difference is the whole ladder: chrome takes the dark grey slot,
         # and this style takes the light grey slot.
-        "node.unknown": "#94a3b8",
+        "node.unknown": "#a2a2a2",
         # The titles of panels and dialogs: the same hue as the border that they are in,
         # one shade brighter. Thus the title reads as part of its frame, and it is still
         # different from the frame. There is one entry for each border style that the frame
         # compositor receives (refer to theme.title_style).
-        "title.accent": "bold #a5b4fc",
-        "title.muted": "bold #cbd5e1",
+        "title.border": "bold #d4d4d4",
+        "title.muted": "bold #d4d4d4",
         "title.warn": "bold #fcd34d",
         "title.err": "bold #fca5a5",
         "title.ok": "bold #86efac",
@@ -123,25 +136,25 @@ MESH_THEME = Theme(
         # (and not bold). This is the opposite of the brightening of the ``title.*`` styles.
         # The hint reads as part of the frame, and it stays behind the frame. There is one
         # entry for each border style (refer to theme.hint_style).
-        "hint.accent": "#6366f1",
-        "hint.muted": "#64748b",
+        "hint.border": "#737373",
+        "hint.muted": "#737373",
         "hint.warn": "#f59e0b",
         "hint.err": "#ef4444",
         "hint.ok": "#22c55e",
         "hint.brand": "#2dd4bf",
         # A step darker than ``muted``, for placeholder dashes (the missing packet count or
         # age of a node). They must stay behind the real, muted values around them.
-        "faint": "#64748b",
+        "faint": "#737373",
         # The ``── Label ──`` of a section heading: in a grouped list, and the day divider
-        # of a chat. It is a dark grey, and never the accent of the frame. When the rule of
-        # a heading had the colour of the border, it looked like part of the frame that it
-        # is in (JP, 2026-10-02). It is bold, so the label is still a landmark at that
-        # shade.
-        "heading": "bold #64748b",
+        # of a chat. It has the colour of the title of the frame (``title.border``, JP,
+        # 2026-10-15). It was a dark grey before. It is never the grey of the border itself:
+        # when the rule of a heading had the colour of the border, it looked like part of
+        # the frame that it is in (JP, 2026-10-02).
+        "heading": "bold #d4d4d4",
         # A further step darker than ``faint``, for the unlit track of a meter (the SNR
         # quality bars). It is dark enough to look like a background, and not like a
         # dimmer version of the reading.
-        "track": "#334155",
+        "track": "#404040",
         "snr.good": "bold #4ade80",
         "snr.ok": "bold #fbbf24",
         "snr.bad": "bold #f87171",
@@ -158,20 +171,19 @@ MESH_THEME = Theme(
         "batt.low": "bold #f87171 on #991b1b",
         "batt.flash": "not bold #000000 on #dc2626",
         "batt.flash.off": "bold #f87171",
-        # The node-type *marks*: the only colours for ● ▲ ■ ◉ where a node with a type is
-        # drawn (refer to ui.widgets.NODE_GLYPHS). They are also the language of the markers
-        # of the map: clients are the loud pink, repeaters are the calmer violet, rooms are
-        # a white square, and sensors are an orange dot with a ring. They are named styles
-        # and not raw hex, so the 16-slot console chooses its slot *on purpose*. A naive
-        # downsample of the violet gives grey, and a repeater looks like an unknown node.
-        "type.node": "#f472b6",
-        "type.repeater": "#a78bfa",
+        # The node-type *marks*: the colours for ● ▲ ■ ◉ where a node with a type is drawn
+        # (refer to ui.widgets.NODE_GLYPHS), and the markers of the map. All four are white.
+        # The shape tells the type, so a hue for each type was a colour with no more
+        # information (JP, 2026-10-14). They were pink, violet, white, and orange. Each type
+        # keeps its own style name, so that one type can get a colour again in one place.
+        "type.node": "#ffffff",
+        "type.repeater": "#ffffff",
         "type.room": "#ffffff",
-        "type.sensor": "#fb923c",
+        "type.sensor": "#ffffff",
         # A region name (the scope of a flood). It is not a node, so it has no hue from the
-        # node wheel. It is a light slate. Its slant makes it different from prose, as a
+        # node wheel. It is a light grey. Its slant makes it different from prose, as a
         # tag is different from a sentence.
-        "scope": "italic #cbd5e1",
+        "scope": "italic #d4d4d4",
         # The features of the basemap for which the *hue* is the information: water is
         # blue, parks are green, and a highway is the warm colour. A naive downsample
         # damages them (the dark blue becomes grey, the dark green becomes black, and the
@@ -200,13 +212,13 @@ MESH_THEME = Theme(
         "heat.hours": "#f87171",  # 1 hour
         "heat.days": "#b45309",  # 1 day
         "heat.weeks": "#dc2626",  # 1 week
-        "heat.months": "#94a3b8",  # 1 month
-        "heat.never": "#64748b",  # 1 year, and never heard
+        "heat.months": "#a2a2a2",  # 1 month
+        "heat.never": "#737373",  # 1 year, and never heard
         # The chip fills of the F-key lane of the PicoCalc (refer to ui.tui.fkeys): grey for
         # the plain F1-F5 bank, and green while the Shift watcher reports F6-F10. The text
         # is white on both. They are also defined here so that the style names resolve on
         # each platform, although only footer_fkeys of the PicoCalc asks for them.
-        "fkey.chip": "bold #ffffff on #475569",
+        "fkey.chip": "bold #ffffff on #545454",
         "fkey.chip.shift": "bold #ffffff on #16a34a",
         # The fills of the Cardputer Zero deck, taken from its own keyboard (JP,
         # 2026-09-30). The normal fill is the orange-red in which the fn key and its F4–F8
@@ -225,14 +237,14 @@ MESH_THEME = Theme(
         # and links have the two hues that nothing else in a body uses. A struck-out run
         # goes back to the placeholder grey. The bullet and the rail are the chrome on which
         # a list or a quote hangs.
-        "md.strong": "bold #e2e8f0",
-        "md.em": "italic #cbd5e1",
+        "md.strong": "bold #e7e7e7",
+        "md.em": "italic #d4d4d4",
         "md.code": "#7dd3fc",
         "md.link": "underline #a5b4fc",
-        "md.quote": "italic #cbd5e1",
-        "md.strike": "strike #64748b",
+        "md.quote": "italic #d4d4d4",
+        "md.strike": "strike #737373",
         "md.bullet": "#818cf8",
-        "md.rail": "#475569",
+        "md.rail": "#545454",
     }
 )
 
@@ -246,12 +258,13 @@ MESH_THEME = Theme(
 #:   moves it to slot N+8. Thus a style for a dim slot must say what it means about
 #:   bold. It cannot leave the question open, because Rich merges a *base* style into
 #:   each span that it wraps. Then the ``bold`` of a selected row changes the colour of
-#:   the span completely (a light-grey unknown hash becomes the white "you", and a purple
-#:   repeater becomes pink). Thus each style for a dim slot is explicitly ``not bold``
+#:   the span completely (a light-grey unknown hash becomes the white "you", and a brown
+#:   highway becomes yellow). Thus each style for a dim slot is explicitly ``not bold``
 #:   (the colour is necessary, so keep it) or explicitly ``bold`` (the promotion is the
-#:   intent, and only ``title.muted`` has it). A style is never silent. Never use bold on
-#:   5 and 6, because *different* meanings use their partners here (5 purple = the
-#:   repeater mark, 13 pink = the node mark. 6 cyan = hint.brand, 14 bright cyan = brand).
+#:   intent, and only ``title.muted``, ``title.border``, and ``heading`` have it). A
+#:   style is never silent. Never use bold on 5 and 6, because *different* meanings use
+#:   their partners here (5 purple = the chip fill under a pink name, 13 pink = a node
+#:   hue. 6 cyan = hint.brand, 14 bright cyan = brand).
 #: * Backgrounds can use only slots 0–7 (SGR 40–47).
 #: * The six *chromatic bright* slots (9-14) are the place where the spectrum of node
 #:   names lands. They are the console rendering of the hue wheel that comes from the key
@@ -261,8 +274,8 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (1, "red (hint.err)", "#aa0000"),
     (2, "green (hint.ok)", "#00aa00"),
     (3, "brown/orange (hint.warn, batt.mid, heat.cool, the sensor mark)", "#aa5500"),
-    (4, "blue (hint.accent, bluetooth bg)", "#0000aa"),
-    (5, "purple (the repeater mark)", "#aa00aa"),
+    (4, "blue (bluetooth bg, map.water)", "#0000aa"),
+    (5, "purple (the chip fill of node hue 300°)", "#aa00aa"),
     (6, "cyan (hint.brand)", "#00aaaa"),
     (7, "light grey (default text, heat.cold)", "#aaaaaa"),
     (8, "dark grey (muted, faint, track)", "#555555"),
@@ -270,9 +283,9 @@ _VT_SLOTS: tuple[tuple[int, str, str], ...] = (
     (10, "bright green (ok; node hue 120°)", "#55ff55"),
     (11, "bright yellow (warn, heat.warm; node hue 60°)", "#ffff55"),
     (12, "bright blue (accent; node hue 240°)", "#5555ff"),
-    (13, "bright pink (the node mark — the map's pink, for free; node hue 300°)", "#ff55ff"),
+    (13, "bright pink (node hue 300°)", "#ff55ff"),
     (14, "bright cyan (brand; node hue 180°)", "#55ffff"),
-    (15, "white (you, heat.hot, the room mark)", "#ffffff"),
+    (15, "white (you, heat.hot, the node-type marks)", "#ffffff"),
 )
 
 
@@ -336,14 +349,15 @@ def vtrgb_lines() -> str:
 #: palette. The theme is literal and not derived, so a reviewer can see each slot choice
 #: next to its meaning. The rules for bold-brightness and for backgrounds, which the
 #: theme must obey, are in the documentation of :data:`_VT_SLOTS`, and tests pin them.
-#: The stock palette gives two important results. Bright pink (13) is the colour of the
-#: clients on the map, at no cost. Dim purple (5) replaces the violet of the repeaters
-#: on the map. The cost is that the three greys (muted, faint, track) all become slot 8,
+#: The stock palette has a cost: the three greys (muted, faint, track) all become slot 8,
 #: because the stock palette has only one dark grey.
 MESH_THEME_16 = Theme(
     {
         "brand": "bold color(14)",
         "accent": "bold color(12)",
+        # The border: the light grey, which is the nearest slot to the grey of the regular
+        # theme. It is ``not bold`` because 7 is a dim slot (refer to the bold rule).
+        "border": "not bold color(7)",
         # Slot 7 is the only grey that the VT can put *behind* a reverse. Backgrounds stop at
         # the dim bank, and the dark grey of slot 8 becomes black there. It is the same
         # light grey that the F-key lane already uses to fill its chips. This is the
@@ -360,6 +374,8 @@ MESH_THEME_16 = Theme(
         "pathline": "none",
         "err.reverse": "reverse bold color(9)",
         "you": "bold color(15)",
+        # Slot 15 is already bright, so it needs no bold to be white.
+        "compose": "color(15)",
         "device.known": "bold color(15)",
         "qr": "bold color(15) on color(0)",
         "bluetooth": "bold color(15) on color(4)",
@@ -371,24 +387,24 @@ MESH_THEME_16 = Theme(
         # Light grey, a step *above* the dark grey of muted. The console has only two greys,
         # and the hash of an unidentified node is content, not chrome.
         "node.unknown": "not bold color(7)",
-        "title.accent": "bold color(12)",
-        # The one promotion on purpose: bold moves slot 7 to 15. This title needs a colour
-        # that is almost white (the regular theme writes it as #cbd5e1).
+        # Two of the promotions on purpose (``heading`` is the third): bold moves slot 7 to
+        # 15. These titles need a colour that is almost white (the regular theme writes it
+        # as #d4d4d4).
+        "title.border": "bold color(7)",
         "title.muted": "bold color(7)",
         "title.warn": "bold color(11)",
         "title.err": "bold color(9)",
         "title.ok": "bold color(10)",
         "title.brand": "bold color(14)",
-        "hint.accent": "not bold color(4)",
+        "hint.border": "color(8)",
         "hint.muted": "color(8)",
         "hint.warn": "not bold color(3)",
         "hint.err": "not bold color(1)",
         "hint.ok": "not bold color(2)",
         "hint.brand": "not bold color(6)",
         "faint": "color(8)",
-        # The one dark grey of the console. Slot 8 is already in the bright bank, so bold
-        # changes nothing.
-        "heading": "bold color(8)",
+        # The colour of the title of the frame (``title.border``): bold moves slot 7 to 15.
+        "heading": "bold color(7)",
         "track": "color(8)",
         "snr.good": "bold color(10)",
         "snr.ok": "bold color(11)",
@@ -401,10 +417,10 @@ MESH_THEME_16 = Theme(
         "batt.low": "bold color(9) on color(1)",
         "batt.flash": "not bold color(0) on color(1)",
         "batt.flash.off": "bold color(9)",
-        "type.node": "color(13)",
-        "type.repeater": "not bold color(5)",
+        "type.node": "color(15)",
+        "type.repeater": "color(15)",
         "type.room": "color(15)",
-        "type.sensor": "not bold color(3)",
+        "type.sensor": "color(15)",
         # A region name: the VT has no italic, and each chromatic slot is a node hue. Thus
         # the style is the plain light grey. The word "scope" in front of it makes it
         # different from other text.
@@ -476,9 +492,10 @@ def mark_rgb(colour: str) -> tuple[int, int, int]:
     A canvas paints in RGB and not in styles (refer to :mod:`~meshterm.ui.mapcanvas`). A
     marker that must agree with its twin that Rich draws gets the *same colour* through
     this function. The function accepts both encodings that the marker language uses. One
-    is a literal ``#rrggbb`` (the fixed map marks in :mod:`~meshterm.ui.marks`). The other
-    is a theme style name (the node-type marks, which have names so that each platform
-    chooses its own colour, refer to ``type.*`` of the theme).
+    is a literal ``#rrggbb`` (for example a grey of the basemap in
+    :mod:`~meshterm.ui.map_render`). The other is a theme style name (the marks in
+    :mod:`~meshterm.ui.marks` and the node-type marks, which have names so that each
+    platform chooses its own colour, refer to ``type.*`` of the theme).
 
     On the 16-slot theme, a ``color(N)`` entry gives the :data:`_VT_SLOTS` RGB of that
     slot, and not the stock triple of Rich. The palette of Rich is a shade different from
@@ -538,7 +555,7 @@ def title_style(border_style: str) -> str:
 
     Args:
         border_style: The theme name in which the border of the panel is drawn
-            (``"accent"``, ``"warn"``, and other names).
+            (``"border"``, ``"warn"``, and other names).
 
     Returns:
         The matching ``title.*`` theme name. If no brighter variant is defined, it is
@@ -558,7 +575,7 @@ def hint_style(border_style: str) -> str:
 
     Args:
         border_style: The theme name in which the border of the panel is drawn
-            (``"accent"``, ``"warn"``, and other names).
+            (``"border"``, ``"warn"``, and other names).
 
     Returns:
         The matching ``hint.*`` theme name. If no variant is defined, it is ``"muted"``.
@@ -945,7 +962,7 @@ def _nearest_slot_params(background: bool, r: int, g: int, b: int) -> str:
     the console spells bright. Thus a bare ``31`` immediately after a ``90`` inherits the
     intensity bit, and renders as ``91`` without a message. Quantized art is a run of
     colour spans that are next to each other, and no style boundary between them resets
-    the intensity (the bevel of the wordmark has a slate span in every other span, and a
+    the intensity (the bevel of the wordmark has a grey span in every other span, and a
     map raster has neighbouring cells). Thus the promotion happens in the middle of a row
     and gives the wrong colour to half a row. The fourth row of the narrow wordmark (its
     only row with a dim slot) was part red and part light red. The split was at each span

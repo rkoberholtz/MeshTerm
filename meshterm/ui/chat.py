@@ -34,19 +34,28 @@ from ..core.events import EventKind, MeshEvent
 from ..core.models import ChatMessage, Contact, Conversation, Message, utcnow
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
-from .pathline import PATH_INK
+from .compose import MentionEditor
+from .pathline import PATH_INK, PathHop
 from .qr import QrScreen, qr_strip
 from .theme import emoticon, name_style, snr_style
 from .tui.prompt import (
     CHANNEL_BYTE_LIMIT,
     DM_BYTE_LIMIT,
-    LineEditor,
     byte_counter,
 )
 from .tui.render import render_hanging, render_lines, right_aligned_tail
 from .tui.screen import CANCEL, Screen
 from .tui.spinner import Spinner, spinner_interval
-from .widgets import DESTINATION, ORIGIN, name_chip
+from .widgets import (
+    DESTINATION,
+    ORIGIN,
+    author_chip,
+    hop_chip,
+    mention_hop,
+    mention_mark,
+    picked_hop,
+    self_chip,
+)
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -68,8 +77,9 @@ _FAILED = ("✗", "err")
 #: next to it.
 _WORD = re.compile(r"\S+")
 
-#: The column where a URL starts when it is too long to hang under its body: the column of
-#: the timestamp, after the ``❯`` that is in front of the first line of the selected message.
+#: The column where a URL starts when it is too long to hang under its body: the column
+#: after the ``❯`` that is in front of the first line of the selected message. A message
+#: that names us has its mark in this column, and the timestamp follows it.
 _URL_GUTTER = 2
 
 #: Whether the URLs of a message are drawn as QR codes under it (``Platform.url_codes``,
@@ -84,7 +94,10 @@ _COUNT_MARK = ""
 
 @on_platform
 def _bind(platform: Platform) -> None:
-    """Bind the choices of the transcript that depend on the platform (now and at each switch)."""
+    """Bind the transcript to the platform (now and at each switch).
+
+    The platform says whether codes hang under URLs, and how a reaction count is marked.
+    """
     global _URL_CODES, _COUNT_MARK
     _URL_CODES = platform.url_codes
     _COUNT_MARK = "" if platform.emoji else "x"
@@ -109,6 +122,17 @@ def _fit_hint(atoms: list[str], spare: tuple[str, ...] = ()) -> str:
     return " · ".join(kept)
 
 
+#: The long words of a hint atom, and the short words that the same atom has when the hint
+#: needs the room. The two forms count as one atom. The short form leaves out a note or a
+#: second key, as the hint already does for ^U, ^L, and ^O.
+_SHORT_ATOMS = {"Enter reply (@mention)": "Enter reply", "^End/Esc cancel": "Esc cancel"}
+
+
+def _atom_set(hint: str) -> set[str]:
+    """The atoms of a hint, each in its short form, to compare two hints by their atoms."""
+    return {_SHORT_ATOMS.get(atom, atom) for atom in hint.split(" · ")}
+
+
 class ChatScreen(Screen):
     """A live conversation: a transcript that scrolls, above a pinned input line.
 
@@ -121,9 +145,9 @@ class ChatScreen(Screen):
     of the selected message. A path belongs to one message, so when no message is
     selected, there is nothing to show. ^U shows the links of the selected message as QR
     codes, on the share screen. ^L opens the map on the node of the author of the selected
-    message, when that node has a location. ^E reacts to the selected message with an emoji
-    (refer to :mod:`~meshterm.core.reactions`). When no message is selected, Esc leaves the
-    chat.
+    message, when that node has a location. ^K locks that author against the archive
+    sweep, or unlocks it. ^E reacts to the selected message with an emoji (refer to
+    :mod:`~meshterm.core.reactions`). When no message is selected, Esc leaves the chat.
 
     A reaction is a message on the wire, but the transcript does not show it as one. It shows
     each reaction under the message that it reacts to: the emoji and a count, or the names of
@@ -162,16 +186,22 @@ class ChatScreen(Screen):
         same size, so there the chip only shows one code alone. ``Map`` is lit while the
         author of the selection has a location (refer to :meth:`_locate_target`).
 
-        ``React`` (^E) is on the Shift half of F2, behind ``URL→QR``. A channel and a DM have
-        it, and a room does not. Thus it goes on the Shift bank, the bank for a verb that not
-        all three screens share. A room puts ``Log in`` there instead. ``React`` is lit while
-        the selection is a message that a reaction can name (refer to :meth:`_can_react`).
-
         ``Author`` (^O, the node page of the author of the selection) is the fourth shared
         verb, and the plain bank has only three slots. Thus it is on the Shift half of F3,
         behind ``Map``, the other verb about the author. It is lit while the author has a
         page (refer to :meth:`_author_page`). Each of the two halves of F3 is empty when
         the screen has nothing to find that node with.
+
+        ``Lock`` (^K) is the fifth verb about the author, and it is on the Shift half of F2.
+        It toggles the lock of the author, so it reads ``Unlock`` on a locked author, and
+        it is lit while the author can have a lock (refer to :meth:`_lock_target`). That
+        slot is free in a channel and in a DM. In a room, ``Log in`` has it, so there the
+        user locks from the ``Author`` page, which a conversation opens with its lock row
+        (JP, 2026-10-19). The slot is empty where MeshTerm cannot store a lock.
+
+        ``React`` (^E) has no slot. It was on the Shift half of F2 before ``Lock`` came, and
+        the Shift bank has no free slot now. ``Lock`` keeps the slot (Rich, 2026-10-22), so a
+        reaction is ^E only, and the hint names it when there is room.
 
         The Shift half of F1 follows the two rules of the lane. In a channel with no
         resend connected, it is empty, because a channel message is never acknowledged and
@@ -212,13 +242,17 @@ class ChatScreen(Screen):
             enabled=self._selected is not None and self._paths is not None,
             opp_enabled=self._retry_target() is not None,
         )
-        react = ("React", "react") if self._fold is not None else ("", "")
+        lock = self._lock_target()
+        if self._pages is not None and self._pages.can_lock:
+            toggle = ("Unlock" if lock is not None and lock[1] else "Lock", "lock")
+        else:
+            toggle = ("", "")
         lane[1] = FPair(
             "URL→QR",
             "url_code",
-            *react,
+            *toggle,
             enabled=bool(self._picked_urls()),
-            opp_enabled=self._can_react(),
+            opp_enabled=lock is not None,
         )
         if self._locator is not None or self._pages is not None:
             where = ("Map", "locate") if self._locator is not None else ("", "")
@@ -252,6 +286,7 @@ class ChatScreen(Screen):
         reaction_set: list[str] | None = None,
         max_parts: int = 1,
         part_gap_s: float = 0.0,
+        self_key: str | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -289,9 +324,11 @@ class ChatScreen(Screen):
             pages: The contacts, for ^O: the node page of the author of the selected
                 message (refer to :class:`~meshterm.ui.node_detail_screen.ContactPages`).
                 With ``None``, ^O does nothing.
-            self_name: The name of our node. A channel reaction names the author of its
-                target, and our node is the author of each message that we sent. With
-                ``None``, our channel messages get no reactions.
+            self_name: The name of our node (refer to :func:`our_node`). Our messages and
+                the mentions of our name show it (:func:`~meshterm.ui.widgets.self_chip`).
+                A channel reaction names the author of its target, and our node is the
+                author of each message that we sent. With ``None``, our channel messages
+                get no reactions.
             reaction_set: The emoji that ^E offers, in order. ``None`` offers
                 :data:`~meshterm.core.reactions.DEFAULT_REACTIONS`.
             max_parts: The largest number of parts for a message that is too long for one
@@ -300,8 +337,11 @@ class ChatScreen(Screen):
             part_gap_s: The time to wait between two parts of a channel message, so that
                 the parts do not go out as a burst. A direct part waits for its
                 acknowledgement, and does not wait this time.
+            self_key: Our public key, which gives the hue of that chip.
         """
         super().__init__()
+        self._self_name = self_name
+        self._self_key = self_key
         self._scope = scope if conversation.is_channel else None
         self.title = f"{conversation.label} · {self._scope}" if self._scope else conversation.label
         self._is_channel = conversation.is_channel
@@ -341,7 +381,7 @@ class ChatScreen(Screen):
         self._pages = pages
         self._names = names
         self._session = session
-        self._editor = LineEditor()
+        self._editor = MentionEditor()
         self._sending = False
         # It turns while a direct message is in flight, so that the glyph at the end of the
         # message spins (instead of a static hourglass) until the ack resolves. All messages
@@ -395,12 +435,36 @@ class ChatScreen(Screen):
         selected message whose author has a node page (refer to :meth:`_author_page`).
         ``^R retry failed`` must have something to retry (refer to :meth:`_retry_target`).
         The F-key lane uses the same rules to dim its slots.
+
+        ``^K lock`` (or ``^K unlock``) must have a selected message whose author can have a
+        lock (refer to :meth:`_lock_target`). It goes in only when there is room for it
+        (JP, 2026-10-19: "If there's room, put it."): the hint with it must stay in 72 cells
+        and keep each atom of the hint without it. It can make the words of an atom shorter
+        (:data:`_SHORT_ATOMS`), as ^U, ^L, and ^O already do. When it does not go in, the
+        status line still tells what the key did.
         """
+        hint = self._hint_with("")
+        lock = self._lock_target()
+        if lock is not None:
+            atom = "^K unlock" if lock[1] else "^K lock"
+            longer = self._hint_with(atom)
+            # ^E react gives way to ^K, as React gives way to Lock on the Shift half of F2.
+            if (
+                cell_len(longer) <= _HINT_CELLS
+                and atom in longer.split(" · ")
+                and _atom_set(hint) - {"^E react"} <= _atom_set(longer)
+            ):
+                return longer
+        return hint
+
+    def _hint_with(self, lock: str) -> str:
+        """The key hint, with the ``lock`` atom after ``^O author`` (or no atom for ``""``)."""
         if self._selected is not None:
             code = "^U QR" if self._picked_urls() else ""
             where = "^L map" if self._locate_target() is not None else ""
             who = "^O author" if self._author_page() is not None else ""
             react = "^E react" if self._can_react() else ""
+            react_first = ("^E react",) if lock else ()
             if self._is_channel and self._retry_target() is not None:
                 # A selected scoped message of ours can be sent again unscoped, and the hint
                 # must name that key. The "(@mention)" of the reply and ^End are removed to
@@ -415,12 +479,13 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        lock,
                         react,
                         "^R resend unscoped",
                         "↑↓ pick",
                         "Esc cancel",
                     ],
-                    spare=("↑↓ pick", "^P paths", "^O author", "^E react"),
+                    spare=(*react_first, "↑↓ pick", "^P paths", "^O author", "^E react"),
                 )
             if self._replies:
                 # With all the keys of a selection, the long words do not fit in 72 cells.
@@ -432,6 +497,7 @@ class ChatScreen(Screen):
                         code,
                         where,
                         who,
+                        lock,
                         react,
                         "↑↓ pick",
                         "^End/Esc cancel",
@@ -443,12 +509,22 @@ class ChatScreen(Screen):
                 # ^E goes after ↑↓ when even the short words do not fit. The keys of the
                 # selection that were here before ^E keep their places.
                 return _fit_hint(
-                    ["Enter reply", "^P paths", code, where, who, react, "↑↓ pick", "Esc cancel"],
-                    spare=("↑↓ pick", "^E react"),
+                    [
+                        "Enter reply",
+                        "^P paths",
+                        code,
+                        where,
+                        who,
+                        lock,
+                        react,
+                        "↑↓ pick",
+                        "Esc cancel",
+                    ],
+                    spare=(*react_first, "↑↓ pick", "^E react"),
                 )
             return _fit_hint(
-                ["Enter paths", code, where, who, react, "↑↓ pick", "^End/Esc cancel"],
-                spare=("↑↓ pick", "^E react"),
+                ["Enter paths", code, where, who, lock, react, "↑↓ pick", "^End/Esc cancel"],
+                spare=(*react_first, "↑↓ pick", "^E react"),
             )
         if self._retry_target() is not None:
             if self._is_channel:
@@ -546,10 +622,17 @@ class ChatScreen(Screen):
         when the text wraps onto a second line, the counter stays in the bottom-right
         corner and does not follow the cursor down the wrap. Only when the last line is
         already full to the edge does the counter go onto its own right-aligned line.
+
+        Each complete mention in the line shows as its chip, the same chip as in the
+        transcript (refer to :class:`~meshterm.ui.compose.MentionEditor`). A chip never
+        breaks across two lines.
         """
         limit = self._byte_limit()
-        input_line = self._editor.render(overflow_at=self._overflow_at(limit))
-        return right_aligned_tail(input_line, self._byte_counter(limit), width)
+        input_line = self._editor.render_line(
+            self._mention_hop, overflow_at=self._overflow_at(limit)
+        )
+        whole = [(s.start, s.end) for s in input_line.spans if str(s.style) == PATH_INK]
+        return right_aligned_tail(input_line, self._byte_counter(limit), width, whole=whole)
 
     # --- outgoing byte limit -------------------------------------------------
 
@@ -627,6 +710,10 @@ class ChatScreen(Screen):
           replaced in place when a pending bubble resolved, or it was removed), or
         * its number of reactions is different from the cache (a reaction arrived).
 
+        A change of the locks draws all of the transcript again, because the sender chip of
+        a locked contact has a padlock (refer to :meth:`_group_header`). The locks change
+        rarely: ^K here, or the lock row of the node page of an author.
+
         Most importantly, this works for each message. It is not a cached prefix that
         stops at the first such row. Thus a message stays cheap to draw again, however far
         back it is in a long transcript. With a prefix that stops, a page up through the
@@ -637,7 +724,14 @@ class ChatScreen(Screen):
         messages = self._messages
         total = len(messages)
         cache = self._render_cache
-        if cache is not None and cache["width"] == width:
+        spacing = self.section_spacing()
+        locks = self._pages.locked_keys() if self._pages is not None else frozenset()
+        if (
+            cache is not None
+            and cache["width"] == width
+            and cache["spacing"] == spacing
+            and cache["locks"] == locks
+        ):
             cached_ids = cache["ids"]
             cached_acked = cache["acked"]
             cached_selected = cache["selected"]
@@ -664,6 +758,9 @@ class ChatScreen(Screen):
         boundaries: list[int] = []
         prev_group: tuple[bool, str] | None = None
         prev_day = None
+        # The first message of the group of the selected message. Its slice has the author
+        # chip of the group, which is white while the selection is in the group.
+        picked_head = self._picked_head()
 
         for idx in range(total):
             message = messages[idx]
@@ -675,10 +772,13 @@ class ChatScreen(Screen):
             group = (message.outbound, sender)
             new_day = day != prev_day
             selected = idx == self._selected
+            # A slice that the selection changes renders again, now and on the next paint
+            # after the selection leaves it: the selected message, and the head of its group.
+            marked = selected or idx == picked_head
             pending = message.acked is None and message.outbound and not message.is_channel
             react_count = self._fold.count(message) if self._fold is not None else 0
             reusable = (
-                not selected
+                not marked
                 and not pending
                 and idx < cache_count
                 and not cached_selected[idx]
@@ -686,16 +786,23 @@ class ChatScreen(Screen):
                 and cached_acked[idx] == message.acked
                 and cached_reacts[idx] == react_count
             )
+            # A blank line closes the messages of an author and the messages of a day, where
+            # the preferences ask for it (:meth:`~meshterm.ui.tui.screen.Screen.section_spacing`,
+            # the same test as the section headings of a list). It is the first line of the
+            # slice of the message that starts the next group, so a cached slice brings it
+            # back with it.
+            gap = spacing and bool(lines) and (new_day or group != prev_group)
             if reusable:
                 start = cached_boundaries[idx - 1] if idx > 0 else 0
                 slice_lines = cached_lines[start : cached_boundaries[idx]]
                 if new_day:
-                    self._sticky_headers.append((len(lines), [slice_lines[0]]))
+                    at = int(gap)  # the divider comes after the gap
+                    self._sticky_headers.append((len(lines) + at, [slice_lines[at]]))
                 lines += slice_lines
             else:
+                if gap:
+                    lines.append("")
                 if new_day:
-                    if lines:
-                        lines += render_lines(Text(""), width)
                     # A day divider is the section heading of this transcript: it pins to the
                     # top row while its day scrolls under it, and ^PgUp/^PgDn step by it.
                     # Thus it has the heading style of the app (``── Label ──`` in the bold
@@ -707,9 +814,7 @@ class ChatScreen(Screen):
                     self._sticky_headers.append((len(lines), [divider[0]]))
                     lines += divider
                 if new_day or group != prev_group:
-                    if not new_day and lines:
-                        lines += render_lines(Text(""), width)  # gap between sender groups
-                    header = self._group_header(sender, message)
+                    header = self._group_header(sender, message, picked=idx == picked_head)
                     lines += render_lines(header, width)
                 if selected:
                     # The first message has the head of the transcript: nothing comes before
@@ -725,12 +830,14 @@ class ChatScreen(Screen):
             prev_group, prev_day = group, day
             ids.append(id(message))
             ackeds.append(message.acked)
-            selecteds.append(selected)
+            selecteds.append(marked)
             reacts.append(react_count)
             boundaries.append(len(lines))
 
         self._render_cache = {
             "width": width,
+            "spacing": spacing,
+            "locks": locks,
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
@@ -754,28 +861,62 @@ class ChatScreen(Screen):
             return (name or "·"), body
         return (self._name(message.peer) or message.peer or "?"), message.text
 
-    def _group_header(self, sender: str, message: ChatMessage) -> Text:
+    def _picked_head(self) -> int | None:
+        """The index of the first message of the group of the selected message, or ``None``.
+
+        A group is a run of messages from one sender on one day, under one author chip
+        (refer to :meth:`_render_grouped`). The chip is drawn with the first message of the
+        run, so that message is the one to draw again when the selection is in the run.
+        """
+        selected, messages = self._selected, self._messages
+        if selected is None or not 0 <= selected < len(messages):
+            return None
+
+        def group_of(message: ChatMessage) -> tuple:
+            day = message.created_at.astimezone().date()
+            return (day, message.outbound, self._sender_and_body(message)[0])
+
+        group = group_of(messages[selected])
+        head = selected
+        while head > 0 and group_of(messages[head - 1]) == group:
+            head -= 1
+        return head
+
+    def _group_header(self, sender: str, message: ChatMessage, *, picked: bool = False) -> Text:
         """Build the sender header that starts a group: the name, drawn as a chip.
 
         The chip makes a *label* different from the prose under it. A name alone above its
         messages then reads as a tag, not as a coloured word that a person typed. It is the
         chip of a path line (refer to :func:`~meshterm.ui.widgets.name_chip`). Thus a
-        sender looks exactly like that node as a hop in a route, also for our messages:
-        the ``★``, never our name.
+        sender looks exactly like that node as a hop in a route.
 
-        Our star comes from the direction of the message (``outbound``), not from the
+        Our messages are the exception. They go under our name, as ``★ Name`` on a chip
+        in white (refer to :func:`~meshterm.ui.widgets.self_chip`). A route
+        shows our end as the bare ``★``, but a chat is a conversation between names.
+        Our chip comes from the direction of the message (``outbound``), not from the
         ``"you"`` label. Thus a remote sender with the name ``you`` still gets the hue of
         its key, and does not look like our node.
 
         The sender is the origin of the route of each message under it. Thus the chip
         closes on the point, the mark of a route that goes on. An ``@mention`` in a body is
         the other end, and it opens on the notch (refer to :meth:`_render_mentions`).
+
+        A sender that is a locked contact has the padlock before its name, in the place of
+        the ``★`` of our chip (JP, 2026-10-19). Thus the chip shows the state that ^K
+        toggles.
+
+        With ``picked``, the selected message is in this group, and the label of the chip
+        is white, as the text of that message is (refer to
+        :func:`~meshterm.ui.widgets.picked_hop`, JP, 2026-10-19). Our chip already has a
+        white label.
         """
         if message.outbound:
-            return name_chip("", you=True, role=ORIGIN)
+            return self_chip(self._self_name, self._self_key, role=ORIGIN)
         # ``·`` is a channel line that arrived with no sender prefix: there is no key to use.
         key = None if sender == "·" else self._header_key(sender, message)
-        return name_chip(sender, key, role=ORIGIN)
+        pages = self._pages
+        locked = key is not None and pages is not None and pages.lock_state(pages.find(key)) is True
+        return author_chip(sender, key, locked=locked, picked=picked)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.
@@ -799,8 +940,16 @@ class ChatScreen(Screen):
         is marked as the reply target (the same as the ``❯`` pointer and the highlight of
         the select screen).
 
+        A message that mentions our name has a mark at the left of its time: the white
+        ``★`` of our node (refer to :func:`~meshterm.ui.widgets.mention_mark`, JP,
+        2026-10-13). The chip of the mention in the body has our white label, but no star
+        (refer to :func:`~meshterm.ui.widgets.mention_hop`). Thus the mark of a message that
+        names us is in one column, where the eye finds it when it goes down the transcript.
+        Each time has the two cells of that column in front of it, so that all the times stay
+        in one column too.
+
         A URL is never cut where the screen can hold it. A URL that is too long for the
-        body lane moves out to the column of the timestamp, on its own line (refer to
+        body lane moves out to the column after the ``❯``, on its own line (refer to
         :func:`~meshterm.ui.tui.render.render_hanging`). This is because a terminal opens
         a link, and a user copies one, only while it is on one line.
 
@@ -812,6 +961,11 @@ class ChatScreen(Screen):
         stamp = message.created_at.astimezone()
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
+        if self._names_us(body):
+            prefix.append_text(mention_mark(self._self_key))
+            prefix.append(" ")
+        else:
+            prefix.append("  ")
         prefix.append(f"{stamp:%H:%M}  ", style="cursor" if selected else "muted")
         body_text = self._body_text(body, message, selected=selected)
         whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
@@ -902,19 +1056,24 @@ class ChatScreen(Screen):
         return Text(f"  · scope {message.scope}", style="muted")
 
     def _render_mentions(self, body: str, *, selected: bool) -> Text:
-        """Render body text, and change each ``@[Name]`` token to a ``@Name`` chip.
+        """Render body text, and change each ``@[Name]`` token to the chip of that node.
 
         The reply flow puts an ``@[Name]`` token in the compose line (refer to
-        :meth:`_begin_reply`). Here it shows as ``@Name`` in a chip of the hue of that
-        node. Thus the user sees that a mention belongs to the node that it names. The text
+        :meth:`_begin_reply`). Here it shows as the name in a chip of the hue of that node.
+        Thus the user sees that a mention belongs to the node that it names. The text
         around the mentions keeps the base style of the line (``cursor`` when the message
-        is the selected reply target, or else no style).
+        is the selected reply target, or else no style). A mention of our own name has our
+        chip, in white, and the line has our white ``★`` at the left of its time
+        (refer to :meth:`_body_lines`). Thus a message that names us is easy to see.
 
         The chip opens on the notch, because the node that a mention names is the
         destination of a route that came from the sender (refer to :meth:`_group_header`,
-        whose chip closes on the point). The ``@`` stays in the chip. A chip keeps the words
-        of the arrow mode, where a mention is ``@Name`` with no frame, as it was before the
-        chip (JP, 2026-10-10).
+        whose chip closes on the point). The chip has no ``@``, because the chip already
+        says that the name is a mention (JP, 2026-10-13). Arrow mode has no chip, so there a
+        mention keeps its ``@`` (refer to :func:`~meshterm.ui.widgets.mention_hop`).
+
+        On the selected message, the label of each chip is white, as the text around it is
+        (refer to :func:`~meshterm.ui.widgets.picked_hop`, JP, 2026-10-19).
         """
         base = "cursor" if selected else None
         text = Text()
@@ -922,13 +1081,32 @@ class ChatScreen(Screen):
         for match in MENTION.finditer(body):
             if match.start() > pos:
                 text.append(body[pos : match.start()], style=base)
-            name = match.group(1)
-            key = self._sender_key(name, mention=True)
-            text.append_text(name_chip(f"@{name}", key, role=DESTINATION))
+            hop = self._mention_hop(match.group(1))
+            if selected:
+                hop = picked_hop(hop)  # the chips turn white with the text around them
+            text.append_text(hop_chip(hop, role=DESTINATION))
             pos = match.end()
         if pos < len(body):
             text.append(body[pos:], style=base)
         return text
+
+    def _mention_hop(self, name: str) -> PathHop:
+        """The hop of a mention of ``name``: in the transcript, and in the compose line.
+
+        The two use this one method, so a chip in the compose line is the chip that the
+        message will show after the send. A mention of our name has our key and the chip
+        with the white label. Each other name has the key that the names of the senders
+        give (refer to :meth:`_sender_key`).
+        """
+        if self._self_name and name == self._self_name:
+            return mention_hop(name, self._self_key, you=True)
+        return mention_hop(name, self._sender_key(name, mention=True))
+
+    def _names_us(self, body: str) -> bool:
+        """Whether ``body`` has a mention of our name (it gets a mark before its time)."""
+        if not self._self_name:
+            return False
+        return any(match.group(1) == self._self_name for match in MENTION.finditer(body))
 
     def _delivery_glyph(self, acked: bool | None) -> Text:
         """Map the ``acked`` state of an outbound direct message to the mark at its end.
@@ -998,9 +1176,10 @@ class ChatScreen(Screen):
         message starts a reply with an ``@mention`` in a channel, and opens the delivery
         paths in a direct chat. In the two types of chat, ^P opens the paths of the
         selected message, ^U the QR codes of its links, ^L the map on its author, and ^E the
-        reaction dialog. The four do nothing when no message is selected. ^End (or a move
-        past the newest message) goes back to the compose line. The first Esc clears the
-        selection, and the second Esc leaves the screen.
+        reaction dialog. ^K locks or unlocks its author. These keys do nothing when no
+        message is selected. ^End (or a move past the newest message) goes back to the
+        compose line. The first Esc clears the selection, and the second Esc leaves the
+        screen.
         """
         if action == "enter":
             if self._selected is not None:
@@ -1022,6 +1201,8 @@ class ChatScreen(Screen):
             self._open_author_page()
         elif action == "react":
             self._begin_react()
+        elif action == "lock":
+            self._toggle_lock()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -1134,11 +1315,56 @@ class ChatScreen(Screen):
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         if message.outbound:
             return lambda: pages.show(None)
+        contact = self._author_contact()
+        return None if contact is None else (lambda: pages.show(contact))
+
+    def _author_contact(self) -> Contact | None:
+        """The contact that wrote the selected message, or ``None``.
+
+        The key of the author finds it (refer to :meth:`_header_key`, the same key that
+        gives the colour of the sender chip). A message of ours, a message with no sender,
+        and an author that is not a contact have none.
+        """
+        pages = self._pages
+        if pages is None or self._selected is None or not self._messages:
+            return None
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        if message.outbound:
+            return None
         sender, _body = self._sender_and_body(message)
         if sender == "·":
             return None
-        contact = pages.find(self._header_key(sender, message))
-        return None if contact is None else (lambda: pages.show(contact))
+        return pages.find(self._header_key(sender, message))
+
+    def _lock_target(self) -> tuple[Contact, bool] | None:
+        """The author that ^K locks or unlocks, and whether it is locked now.
+
+        ``None`` when ^K does nothing: no selected message, a message of ours, an author
+        that is not a contact, or a contact that cannot have a lock (refer to
+        :meth:`~meshterm.ui.node_detail_screen.ContactPages.lock_state`). The hint and the
+        F-key lane ask at each paint, and the store answers from memory.
+        """
+        contact = self._author_contact()
+        if contact is None or self._pages is None:
+            return None
+        locked = self._pages.lock_state(contact)
+        return None if locked is None else (contact, locked)
+
+    def _toggle_lock(self) -> None:
+        """Lock the author of the selected message, or unlock it when it is locked (^K).
+
+        There is no confirm, because the next ^K reverses it, as the row on the node page
+        does. The hint atom and the lane chip change to their opposite. The status line also
+        tells what the key did, because the hint has no room for the atom on each message.
+        """
+        target = self._lock_target()
+        if target is None or self._pages is None:
+            return
+        contact, locked = target
+        self._pages.set_locked(contact, not locked)
+        name = contact.name or contact.key_prefix
+        self._status = f"Unlocked {name}" if locked else f"Locked {name} — no sweep archives it"
+        self._session.invalidate()
 
     def _open_author_page(self) -> None:
         """Open the node page of the author of the selected message (^O). One page at a time.
@@ -1303,12 +1529,28 @@ class ChatScreen(Screen):
         self._selected_line = None
 
     def _begin_reply(self) -> None:
-        """Start the compose line with an ``@mention`` of the sender of the selected message."""
+        """Put an ``@mention`` of the sender of the selected message at the cursor.
+
+        The mention goes in at the cursor of the compose line, and the text that the user
+        already typed stays. Thus a message can name more than one node: select a message,
+        press Enter, select another, and press Enter again. A space comes before the
+        mention when it would touch the word in front of it, and after it when nothing
+        follows or a word would touch it. The mention is a chip from that moment, and the
+        cursor goes after it (refer to :class:`~meshterm.ui.compose.MentionEditor`).
+
+        A message of ours, or one with no sender, gives no name to mention. There the
+        line gets a bare ``@``, and the user types the name.
+        """
         message = self._messages[self._selected]
         sender, _ = self._sender_and_body(message)
         named = not message.outbound and sender != "·"
-        mention = f"@[{sender}] " if named else "@"
-        self._editor = LineEditor(mention + self._editor.text)
+        text, cursor = self._editor.text, self._editor.cursor
+        before = " " if cursor > 0 and not text[cursor - 1].isspace() else ""
+        if named:
+            after = " " if cursor == len(text) or not text[cursor].isspace() else ""
+            self._editor.insert(f"{before}@[{sender}]{after}")
+        else:
+            self._editor.insert(f"{before}@")
         self._clear_selection()
         self._stick = True
         self._session.invalidate()
@@ -1334,7 +1576,7 @@ class ChatScreen(Screen):
                 self._status = f"Too long for {self._max_parts} parts — trim to send."
             self._session.invalidate()
             return
-        self._editor = LineEditor()
+        self._editor = MentionEditor()
         self._sending = True
         self._stick = True
         if self._is_channel:
@@ -1363,7 +1605,7 @@ class ChatScreen(Screen):
             return
         total = len(cut)
         rest = " ".join(parts.unnumbered(cut[i], i + 1, total) for i in range(first, total))
-        self._editor = LineEditor(rest)
+        self._editor = MentionEditor(rest)
 
     async def _send_channel(self, cut: list[str]) -> None:
         """Broadcast each part of a channel message, and append each when the device takes it.
@@ -1752,6 +1994,24 @@ def emoji_catalog() -> tuple[str, ...]:
     )
 
 
+async def our_node(ctx: AppContext) -> tuple[str | None, str | None]:
+    """The name and the public key of our node, from the cache of the session.
+
+    A chat shows them on our messages (refer to :func:`~meshterm.ui.widgets.self_chip`),
+    and a direct chat names one end of each of its packets with the key. The read uses the
+    cache, so it does not ask the device again.
+
+    Returns:
+        ``(name, key)``. An item is ``None`` when the device did not report it, or when the
+        read failed. Our node with no name only keeps the bare ``★`` in a chat.
+    """
+    try:
+        info = await ctx.devstate.self_info()
+    except Exception:  # noqa: BLE001 - our node with no name keeps the bare star
+        return None, None
+    return str(info.get("name") or "") or None, str(info.get("public_key") or "") or None
+
+
 async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     """Open the live chat screen for ``conversation`` and run it until the user closes it.
 
@@ -1833,11 +2093,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
     from .node_detail_screen import ContactPages
 
     paths = await _make_paths_presenter(ctx, conversation, device)
-    self_name: str | None = None
-    try:
-        self_name = str((await ctx.devstate.self_info()).get("name") or "") or None
-    except Exception:  # noqa: BLE001 - with no name, our channel messages get no reactions
-        self_name = None
+    self_name, self_key = await our_node(ctx)
     screen = ChatScreen(
         conversation,
         history,
@@ -1850,8 +2106,9 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         scope=scope,
         resend_unscoped=resend_unscoped,
         locator=await Locator.gather(ctx),
-        pages=await ContactPages.gather(ctx),
+        pages=await ContactPages.gather(ctx, self_key=self_key or ""),
         self_name=self_name,
+        self_key=self_key,
         reaction_set=reactions.reaction_set(ctx.preferences.reaction_emoji),
         max_parts=ctx.preferences.message_parts_max,
         part_gap_s=ctx.preferences.trace_cooldown_s,
@@ -2071,16 +2328,10 @@ async def _make_paths_presenter(
     type_of = trace_runner.make_node_type_resolver(contacts)
     key_of = trace_runner.make_name_key_resolver(contacts, stored_names, heard=named_at)
     prefix_bytes = await ctx.devstate.routing_prefix_bytes()
-    self_name: str | None = None
-    self_key: str | None = None
-    try:
-        info = await ctx.devstate.self_info()
-        self_name = str(info.get("name") or "") or None
-        # Our key names one end of each direct packet in this conversation. The key of
-        # the contact names the other end (refer to :func:`direct_arrivals`).
-        self_key = str(info.get("public_key") or "") or None
-    except Exception:  # noqa: BLE001 - our node with no name only gets no white highlight
-        self_name = None
+    # Our key names one end of each direct packet in this conversation. The key of the
+    # contact names the other end (refer to :func:`direct_arrivals`). Our node with no name
+    # only gets no white highlight.
+    self_name, self_key = await our_node(ctx)
 
     secret = conversation.secret
     if conversation.is_channel and not secret and conversation.channel_idx is not None:

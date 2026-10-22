@@ -56,6 +56,7 @@ from ..platforms import get_platform
 from .theme import glyph
 from .tui import Choice, Separator
 from .tui.emoji_width import cut_cells, drawable
+from .tui.select import splice_hint
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -477,6 +478,22 @@ PICK_LOCATION_LABEL = "Pick location on map…"
 PICK_LOCATION_HELP = "Point at the map to set both coordinates"
 
 
+#: The maximum width of a footer hint, in cells (refer to the UX standards).
+HINT_CELLS = 72
+
+
+def splice_if_room(hint: str, atom: str) -> str:
+    """``hint`` with ``atom`` before its ``Esc`` atom, but only when the result fits.
+
+    This is for an atom that is good to show but that the hint can do without: the lock
+    key (JP, 2026-10-19: "If footer too long, don't put it in the footer. If there's room,
+    put it."). The result must stay in :data:`HINT_CELLS`. No other atom leaves the hint to
+    make space for it, so a hint that is too full stays as it was.
+    """
+    longer = splice_hint(hint, atom)
+    return longer if cell_len(longer) <= HINT_CELLS else hint
+
+
 def changes_phrase(count: int) -> str:
     """``"1 staged change"`` / ``"3 staged changes"`` for dialogs and menu rows."""
     return f"{count} staged change{'' if count == 1 else 's'}"
@@ -650,15 +667,19 @@ def section_heading(label: str) -> Separator:
     to heading. A row built by hand does not get this behaviour. Thus always use this
     function.
 
-    A heading that starts with an icon (``📡 Channels``, the mark of a trophy discipline)
-    loses the icon on a platform that draws no icon lane, the same as a command row. A
-    heading is the same type of label. Also, a substitute glyph next to the rule, which
-    already draws ``──``, looks like noise (refer to :func:`command_label`).
+    A heading is words only, with no icon. Icons go on rows. The headings of Chat
+    (``📡 Channels``) and of the trophy case (the mark of each discipline) had icons. We
+    removed them for a cleaner look (JP, 2026-10-15).
 
     Grey, never the accent of the frame: a rule in the colour of the border looks like a
     part of the frame, not like a heading in it.
+
+    The heading is also *spaced*: a blank line comes before it where the
+    ``section_spacing_min_rows`` preference asks for one (refer to
+    :attr:`~meshterm.ui.tui.select.Separator.spaced`). Thus a list does not put a blank
+    separator before a heading for space.
     """
-    return Separator(f"── {command_label(label)} ──", style="heading", heading=True)
+    return Separator(f"── {label} ──", style="heading", heading=True, spaced=True)
 
 
 def fit_cells(text: str, width: int, *, align: str = "left") -> str:

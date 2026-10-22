@@ -174,6 +174,22 @@ _QUIET_CHOICES: dict[int, str] = {s: f"{s} s" for s in QUIET_CHOICES_S}
 #: column, and for the cost when MeshTerm reclaims a column that is not hidden.
 _WIDTH_CHOICES: dict[str, str] = {"auto": "auto", "yes": "yes", "no": "no"}
 
+#: The smallest terminal, in rows, that gets a blank line before each section. The two
+#: ends are numbers too, so that one comparison (``rows >= value``) gives each choice: 0 is
+#: lower than each terminal, and :data:`_SPACING_NEVER` is higher than each terminal. The
+#: steps between them fall between the heights that MeshTerm knows: the 14 rows of the
+#: Cardputer Zero, a standard terminal of 24, the 26 and 40 rows of the two console fonts of
+#: the PicoCalc, and a tall window on a desktop.
+_SPACING_NEVER = 10_000
+_SPACING_CHOICES: dict[int, str] = {
+    0: "any height",
+    20: "20+ rows",
+    24: "24+ rows",
+    30: "30+ rows",
+    40: "40+ rows",
+    _SPACING_NEVER: "never",
+}
+
 #: How many colours to send to the terminal. ``auto`` is the honest default, and it is the
 #: only value that is not a depth. It means "take prompt_toolkit's verdict unless we can
 #: positively establish better". This rule is the difference between a repaired host and a
@@ -528,6 +544,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         maximum=3650,
         unit="days",
     ),
+    PrefSpec(
+        key="section_spacing_min_rows",
+        label="Section spacing",
+        help="A blank line between sections and between chat authors",
+        group="Display",
+        value_type="enum",
+        # The line costs one row for each section. A standard terminal (24 rows) and the
+        # PicoCalc (26) have the rows. The 14 rows of the Cardputer Zero do not: there a
+        # blank line is a row less of the list. The test is the real height of the
+        # terminal, so a small window on a desktop drops the line too (JP, 2026-10-13). It
+        # applies to each section heading of a list, to the day dividers of a chat, and to
+        # the messages of each author in a chat (JP, 2026-10-15).
+        default=24,
+        choices=_SPACING_CHOICES,
+    ),
     # --- Diagnostics ---------------------------------------------------------------
     PrefSpec(
         key="log_level",
@@ -541,6 +572,18 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         default="WARNING",
         choices=_LOG_LEVEL_CHOICES,
         relaunch=True,
+    ),
+    PrefSpec(
+        key="anonymize",
+        label="Anonymize",
+        help="Mask the home folder and addresses in the log and diagnostics",
+        group="Diagnostics",
+        value_type="bool",
+        # Off: the person who reads the log is usually its owner, who needs each detail as
+        # it is. A user who posts the log and the diagnostics in public turns it on (refer
+        # to meshterm.core.anonymize). The log reads it at each record, so a change applies
+        # at once and not at the next start.
+        default=False,
     ),
 )
 

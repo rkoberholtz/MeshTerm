@@ -1309,7 +1309,7 @@ def _cell_color(line: str, idx: int) -> tuple[int, int, int]:
     return (triplet.red, triplet.green, triplet.blue)
 
 
-_ACCENT = (129, 140, 248)  # The accent border of the theme, #818cf8.
+_BORDER = (143, 143, 143)  # The border grey of the theme, #8f8f8f.
 
 
 def _find(plain: str, glyphs: frozenset[str]) -> int:
@@ -1369,13 +1369,13 @@ def test_a_frame_draws_in_one_colour() -> None:
     flat. The test checks the nested panels with the outer frame, because the pass also
     lit those.
     """
-    inner = Panel(Text("body"), border_style="accent", width=20)
+    inner = Panel(Text("body"), border_style="border", width=20)
     screen = ScrollScreen(Group(Text("above"), inner), title="outer")
     lines = frame.compose_base(Text("h"), screen, "hint", 60, 20).split("\n")
-    assert _border_colours(lines) == {_ACCENT}, "the base frame draws in more than one colour"
+    assert _border_colours(lines) == {_BORDER}, "the base frame draws in more than one colour"
 
     dialog = frame.compose_dialog(ScrollScreen(Text("body"), title="d"), 80, 20)
-    assert _border_colours(dialog.split("\n")) == {_ACCENT}, "so does a dialog's"
+    assert _border_colours(dialog.split("\n")) == {_BORDER}, "so does a dialog's"
 
 
 # --- prompts -----------------------------------------------------------------
@@ -1416,6 +1416,28 @@ def test_text_screen_byte_limit_gauges_and_blocks_an_oversize_entry() -> None:
     for _ in range(2):
         screen.handle("backspace")
     assert _run(screen, "enter") == "hello wor"
+
+
+def test_text_screen_compose_field_has_the_colours_of_the_chat_compose_line() -> None:
+    """A message field draws its ``›`` in the cursor white and its text in the compose white.
+
+    These are the colours of the compose line of a chat. A plain field keeps the accent
+    ``›`` and the default colour of the text.
+    """
+    from meshterm.ui.tui.prompt import LineEditor
+
+    editor = LineEditor("hi")
+    line = editor.render(compose=True)
+    assert not str(line.style)  # a base style also colours the typed text
+    prompt = {str(span.style) for span in line.spans if span.start == 0}
+    typed = {str(span.style) for span in line.spans if (span.start, span.end) == (2, 3)}
+    assert (prompt, typed) == ({"cursor"}, {"compose"})
+    plain = editor.render()
+    assert str(plain.style) == "accent"
+    assert "compose" not in {str(span.style) for span in plain.spans}
+
+    screen = TextScreen("Message for Hub", byte_limit=10, compose=True)
+    assert screen._compose is True
 
 
 def test_line_editor_word_motion() -> None:
@@ -3474,6 +3496,62 @@ def test_a_lazy_body_slices_frames_and_scrolls_exactly_as_a_list_did() -> None:
     assert "row 45" in plain, "the highlight must still be kept in view"
     assert "row 0 " not in plain, "the top of the list should have scrolled away"
     assert "── Group ──" in plain, "the section heading pins once it scrolls off"
+
+
+def test_a_blank_line_comes_before_each_section_where_the_rows_allow(monkeypatch) -> None:  # noqa: ANN001
+    """A terminal of 24 rows or more puts a blank line before each section heading.
+
+    The line separates a section from a row or a note above it. It never comes at the top,
+    after a blank separator, or under another heading, because there it separates nothing.
+    The heading pins at its own line, not at the blank line. The frame records the rows
+    before the body renders, so the first paint is already correct, and a terminal of 14
+    rows (the Cardputer Zero) gets no line. The ``section_spacing_min_rows`` preference
+    moves the limit, and a change applies at the next paint.
+    """
+    from meshterm.core import preferences
+
+    prefs = preferences.Preferences()
+    monkeypatch.setattr(preferences, "current", lambda: prefs)
+    items = [
+        section_heading("A"),
+        Choice("alpha", 1),
+        Separator("  a note"),
+        section_heading("B"),
+        Separator(" "),
+        section_heading("C"),
+        Choice("gamma", 3),
+        section_heading("D"),
+        section_heading("E"),
+        Choice("epsilon", 5),
+    ]
+    screen = SelectScreen("Sections", items)
+    screen.floating = False
+
+    def body(rows: int) -> list[str]:
+        frame.compose_base(Text("hdr"), screen, "Esc back", 53, rows)
+        return [_plain(line).strip() for line in screen.render_body(53)]
+
+    assert body(26) == [
+        "── A ──",
+        "❯ alpha",
+        "a note",
+        "",
+        "── B ──",
+        "",
+        "── C ──",
+        "gamma",
+        "",
+        "── D ──",
+        "── E ──",
+        "epsilon",
+    ]
+    assert [at for at, _ in screen._sticky_headers] == [0, 4, 6, 9, 10]
+    assert body(14).count("") == 1  # only the blank separator of the list itself
+
+    prefs.set("section_spacing_min_rows", 0)  # any height
+    assert body(14).count("") == 3
+    prefs.set("section_spacing_min_rows", 10_000)  # never
+    assert body(26).count("") == 1
 
 
 def test_an_off_screen_rows_live_title_is_left_alone() -> None:

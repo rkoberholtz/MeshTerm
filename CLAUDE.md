@@ -269,19 +269,32 @@ deliberately, one at a time, and say why in the code.
   screen's results were once windowed under its actions: the page came out exactly the
   screen's height, so ↓ on the last action did nothing while `↓ n more` sat under it.
 - Grouped-list section headings use `section_heading("Label")` → `── Label ──` in the
-  bold `heading` grey, never the frame's accent: a rule in the border's colour reads as
-  part of the frame. A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
+  bold `heading` style — the frame title's colour, `title.border` (JP, 2026-10-15) —
+  never the `border` grey: a rule in the border's colour reads as
+  part of the frame. A heading is words only, never an icon — icons live in rows (JP,
+  2026-10-15: Chat's `📡 Channels` and the trophy case's marks came off for a cleaner
+  look). A chat's day divider wears the same dress. That is also what makes a heading *sticky* (it pins to the top row while its section
   scrolls, and the ^PgUp/^PgDn jumps step by it), so build them through it — a hand-rolled
   `Separator` is no landmark. Prose written *directly under* a heading (a description of
   what the section holds) is its preamble and pins with it, in order, as each row scrolls
   off; prose after the section's first row labels nothing and never pins.
+  A heading is also *spaced*: a blank line goes before it wherever the terminal is at
+  least `section_spacing_min_rows` tall (one preference, read through
+  `Screen.section_spacing`, which the chat's author and day breaks read too) — never at
+  the top, after a blank line, or under another heading or a column header. So don't
+  hand-place a `Separator(" ")` before a heading for space: it would show where the
+  preference says no. A blank separator there is only ever the seam between two
+  *different* lists, each with its own icon column (the region editor's table and its
+  actions); the heading then adds no second line.
 - Label + description command rows go through `menu_rows` (two cell-aligned lanes,
   description muted). Editor rows (setting/value/description) go through `lane_row`.
 - A row that opens further prompts ends with `…`; a row that acts immediately doesn't.
 - **A bare-letter shortcut only where nothing is typed.** A screen that filters, finds or
   composes as you type has no free letters, so its verbs are Ctrl chords — one table,
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action where it can be
-  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page; `^G` logs in to a room,
+  (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page, `^K` toggle the lock of
+  the author or of the Contacts list's highlighted contact, `Lock` on Shift+F2 in both —
+  JP, 2026-10-19; `^G` logs in to a room,
   JP's pick, 2026-10-11). One verb per letter across screens is the preference, not the
   rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
   letter a verb of its own, so long as nothing between the keyboard and the app takes it —
@@ -404,7 +417,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - Modal popups over the pushed backdrop (never full-screen replacements).
 - Buttons are reverse-video chips (`  Label  `, `selected` style): safe way out on the
   left, the committing verb on the right **and default**, so Enter commits and Esc backs
-  out. Two escalating caution tiers theme the frame: `danger=True` (amber) for a
+  out. A plain border is the `border` grey (`title.border`/`hint.border` its title and
+  hint) — never a hue: a border is chrome (JP, 2026-10-14; it was the indigo `accent`).
+  Two escalating caution tiers theme the frame: `danger=True` (amber) for a
   disruptive choice — discard edits, reboot, show private key — and `destructive=True`
   (the reserved red) for irreversible **data loss**, so a delete confirm reads red like
   its `typed_confirm` sibling. Bulk or irreversible deletions gate behind `typed_confirm`
@@ -417,8 +432,17 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 - Status marks (single-width, themed): `✓` ok · `✗` err · `⚠`/`?` warn · `●` unread/
   unacked (err) · `○` acked/empty (muted). Never `✔`, `✖`, `✅`, `❌` as status.
-- Node types (shared with the map): `★` you (yellow) · `●` companion · `▲` repeater ·
-  `■` room server · `◉` sensor · `○` unknown.
+- Node types (shared with the map): `★` you (white) · `●` companion · `▲` repeater ·
+  `■` room server · `◉` sensor · `○` unknown. **Every type mark is white** (JP,
+  2026-10-14; they were pink, violet, white, orange): the shape is the type. Each keeps its
+  own `type.*` style so one can regain a colour in one place. `○` keeps `node.unknown`
+  grey, which says "unidentified". On the map a crowd in one cell no longer glows — a white
+  marker has nowhere brighter to go, and JP chose to drop the signal.
+- **Our `★` is white, everywhere** (JP, 2026-10-14): map, routes, lists, legends, chat.
+  `marks.SELF_MARK` carries the theme name `you` — the white of our name — so the console
+  picks its own white, and a raster resolves it through `mark_rgb`. It was the map's
+  yellow, then briefly our key's hue (set from the self-info at run time), and both were
+  dropped. A star something *mutes* keeps its grey — a faded hop, a dimmed return leg.
 - Path cuts: a path line drawn as **chips** that gets cut — a lane that ran out, a row
   scrolled past its edge — breaks the chip off on a half block in that chip's own fill
   (`▐` ends a line, `▌` opens one; `pathline.cut_mark`/`cut_to`), so half the cell is
@@ -429,7 +453,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   origin and destination, never the first and last *relay*. Our own end is always the
   app-wide `★` (`pathline.SELF_GLYPH`, taken straight from `marks.SELF_MARK`), never our
   name: the one node the reader never has to be told, and the cells belong to the hops
-  that differ from row to row. As a chip it is the map's yellow star on neutral dark
+  that differ from row to row. As a chip it is the map's white star on neutral dark
   grey, padded like every other chip.
 - **A path chip is the node's name colour on a darker ground of itself.** The label is the
   hue `node_style` gives the name on every other surface, so a node is one colour in a
@@ -466,7 +490,9 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 - **A lone chip can stand at one end of a route it doesn't draw** (`widgets.hop_chip` /
   `name_chip(role=…)`). A message goes from its author toward the nodes it names, so a
   sender is an `ORIGIN` — square (or round) on the left, the point on the right — and an
-  `@mention` is a `DESTINATION` chip, `@` kept, opening on the notch and ending square. No
+  `@mention` is a `DESTINATION` chip (`widgets.mention_chip`), opening on the notch and
+  ending square, its `@` dropped because the chip already says "mention" (JP, 2026-10-13;
+  arrow mode, with no chip, keeps `@Name`). No
   role is a node alone, square at both ends. Where it applies: the chat's sender chip and
   mentions, the Messages list's preview (author chip, no colon; mentions), the packet
   viewer's `from` (origin) and `to` (destination) rows around the `via` chain, the live
@@ -477,6 +503,33 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   `sender → recipient`), and a lone hop carries no `PATH_INK`, so a cursor row whitens it
   like any name. A chip in prose never breaks across lines (`render_hanging` holds every
   `whole` run together, spaces and all).
+- **In a chat, we go by our name** (channel, DM, room, and the Messages list's preview —
+  nowhere else; JP, 2026-10-13). A route's bare `★` says "you already know who this is",
+  but a chat is a conversation between names, so our sender chip and every mention of our
+  name wear our name **in white on the normal fill of our key's hue** — the fill every
+  known sender gets, with white where they have their hue (`PathHop.white_ink`; JP,
+  2026-10-14, after a turned-over light chip read wrong). The PicoCalc draws the same
+  pair, white on the hue's dim twin. Our **sender** chip is `★ Name`
+  (`widgets.self_chip`), the star in the white label; the star on the page right of the
+  chip was tried and put back (JP, 2026-10-13). A **locked** sender's chip carries the
+  padlock in the same place, `🔒 Name` (`author_chip(locked=…)`, `marks.LOCK_ICON`, `⚿` on
+  the PicoCalc; JP, 2026-10-19). A **mention** of us is the same chip
+  with no star (`mention_chip(you=True)`); the message carrying it gets **our white
+  `★`** left of its time instead (`widgets.mention_mark`, the same on every platform and
+  in arrow mode). The map's yellow star, the chip's notch-and-point pair, its point alone
+  and a star in our hue were all tried there and dropped (JP, 2026-10-13/14). Every time sits two cells right to
+  keep the column (`❯`, a space, the star, a space, then `12:34  body`), and the Messages
+  list puts the star left of the row's age. Arrow mode draws the chip as a padded block
+  in the same pair. With no name or key from the device, the bare `★` chip stays. Path
+  lines (delivery paths, the packet viewer, routes) keep `★`.
+- **The compose line draws a mention as its chip** (`ui/compose.py`, `MentionEditor`): the
+  moment `]` completes an `@[Name]` token it renders as the same chip the transcript will
+  show, and from then on it is an **atom** — ←/→ step over it, ^←/^→ never stop inside
+  it, Backspace at its end and Delete at its start remove all of it. The cursor on a chip
+  turns it into the composer's white slot chip; a chip past the byte limit goes red. The
+  text underneath is unchanged (`@[Name]` is what is sent and counted). Enter on a picked
+  message inserts its mention **at the cursor**, so one message can name several nodes.
+  The `›` wears `cursor` white and the typed text the `compose` white (JP, 2026-10-13).
 - Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup · 📂 restore ·
   🔑 channel/credential key · 🔐 identity/auth secret ·
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·
@@ -492,6 +545,13 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
 
 ### Colour
 
+- **A grey is neutral: r = g = b** (JP, 2026-10-14). Every grey MeshTerm defines — chrome,
+  a keyless chip, a minor road, the emulator's window — has no tint, warm or cold; the
+  Tailwind slates were each re-made at their own OKLab lightness (`#94a3b8` → `#a2a2a2`,
+  `#64748b` → `#737373`, `#334155` → `#404040`), so every contrast stayed put. A colour
+  that has a meaning gets real chroma instead. `tests/test_neutral_greys.py` fails any
+  `#rrggbb` literal under OKLab chroma 0.045 that isn't r=g=b. Part of a wider pass: a
+  colour that carries no meaning is on its way out.
 - Node names are always coloured: `name_style(name, key)` palette hue, derived from the
   node's key (its first byte — any known prefix agrees) so a rename keeps the colour.
   One rule on **every** platform; only the resolution changes (see **Platforms**).
@@ -501,12 +561,19 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   live claimants; outside that window the newest key wins, because a reflash makes a new
   key routinely; JP, 2026-10-11), a bare hash standing in as a name, an `○` ring — takes
   `node.unknown`, THE light grey for an unidentified node, everywhere and on both
-  platforms. Colour is reserved for keyed identities, never seeded from a name's
+  platforms. One exception, a chat's **chips** (`PathHop.quiet`, via `widgets.author_chip`
+  and `mention_hop`): an unknown sender or mention there is **black** on a grey fill
+  (`#cccccc`, the grey of plain text, at `CHIP_LIGHTNESS`), so it stands back among the
+  coloured senders (JP, 2026-10-14; a plain-text grey label read as still lit); routes
+  keep the keyless chip, arrow mode keeps `node.unknown`, and the PicoCalc draws black on
+  its keyless light grey.
+  Colour is reserved for keyed identities, never seeded from a name's
   characters. `node.unknown` is deliberately not `muted`: muted is chrome and may sit a
   step darker, while an unidentified node is content you can still act on. Our own node
   is the pure-white `you` style; a context colouring (chart quality) may still win.
 - **White is what "you picked this" looks like**, and nothing else in the app is allowed
-  to say it. The cursor row — the row `❯` points at, in a select list or in a screen
+  to say it — beside the `you` white and the white node-type marks, whose shape carries
+  their meaning. The cursor row — the row `❯` points at, in a select list or in a screen
   drawing its own rows — wears `cursor` (white), never `brand`: the wordmark's teal is the
   app's identity, not a selection, and teal/cyan is itself a node hue, so a cyan-keyed
   node used to vanish into its own highlight. White is outside the node spectrum, so it
@@ -525,9 +592,14 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   what a route graph's one-byte labels are matched by — so `pathline` stamps its own extent
   (`PATH_INK`, a style that draws nothing) and the fold skips what lies inside it. That is
   what makes the arrow form say what the chip form always said, its fills having never been
-  in the fold's vocabulary. Reverse-video chips — a dialog's committing button,
+  in the fold's vocabulary. The one exception is a chat's **selected message**: its mention
+  chips and its group's author chip go white with its text (JP, 2026-10-19) — the label
+  only, the fill kept (`widgets.picked_hop`: `white_ink` on a chip, `cursor` in arrow mode).
+  An unknown node goes white too: its grey fill already says it is unknown, and white reads
+  better on it than its black label. A mention or an author is a name in a conversation,
+  not a hop of a route. Reverse-video chips — a dialog's committing button,
   a running action's Abort, the arrow-mode composer slot, the editor cursor — are the
-  `selected` fill, a **grey** block (`muted`'s slate; light grey slot 7 on the VT, the one
+  `selected` fill, a **grey** block (`muted`'s grey; light grey slot 7 on the VT, the one
   grey a reverse can put behind text there, and the same fill the F-key lane uses). A chip
   marks where a press lands; it is chrome, and it does not get a hue.
   Recency heat colours heard/first-heard ages, never names — seven steps on plain human
@@ -705,17 +777,21 @@ derived sweep that runs **every** registered command twice, once plain and once 
 
 One codebase, three flavours: **regular** (desktop/ssh, 72 cols, truecolor, emoji),
 **picocalc-lyra** (the PicoCalc's 53×26/53×40 framebuffer console, 16 palette slots, a
-512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, 53×14 in 6×12
-cells on a 320×170 panel MeshTerm paints itself, truecolor, no emoji — hardware not
-yet in hand, so it is chosen by flag only).
+512-glyph font, no emoji), and **cardputer-zero** (M5Stack's Cardputer Zero, both the
+standard model and the Lite, 53×14 in 6×12 cells on a 320×170 panel MeshTerm paints
+itself, truecolor, no emoji — chosen by flag only: its device-tree model is the CM0's
+generic string, so MeshTerm's own console passes the flag). Never hot-swap a Cap on it,
+the LoRa one included: M5Stack says it may make the device malfunction, so the docs say
+to power off first.
 A frozen `Platform` spec (`meshterm/platforms.py`) resolves
 once at boot; consumers bind at platform-switch time via `platforms.on_platform` — never
 branch on the platform per frame, and never `from meshterm.platforms import PLATFORM`.
 
 - The borderless title bar (`frame._title_bar`) is this platform's whole panel border:
   `↑↓ ──── Title ─────── Esc back`. The **clip arrows lead the row and are always both
-  drawn** — colour reads the scroll (the border's `accent` where that direction has more,
-  `muted` where it doesn't), the same live/dim language the lane draws one row below. A
+  drawn** — colour reads the scroll (lit like the title, `title.border`, where that
+  direction has more, `faint` where it doesn't; a `border`-grey arrow once sat too close
+  to `faint` to say it), the same live/dim language the lane draws one row below. A
   pair that appeared and vanished, half of it a blank cell, asked the reader to compare
   the row against a memory of itself; fixed furniture means the bar never changes width
   as the body scrolls either.
@@ -754,7 +830,7 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   steps. Nothing loses its colour for being on the console. Marks whose hue is *fixed*
   rather than derived go through a theme name so the slot is chosen deliberately (the
   node types' `type.*`; a raster resolves the same entry via `theme.mark_rgb`) — a naive
-  downsample greys the repeater's violet. Footer hints are replaced by the **F-key lane**
+  downsample greys a dim violet. Footer hints are replaced by the **F-key lane**
   (`ui/tui/fkeys.py`): five `FPair` slots per screen, F1–F5 primary and F6–F10 each
   slot's *opposite number* (physical Shift+F1..F5), labels ≤6 cells. `DEFAULT_LANE` claims
   only **F4/F5 — the pager**, which has no physical key at all; **the jump to either end
@@ -786,7 +862,12 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   on Shift+F2. F4/F5 stay the pager, with `Latest`/`Oldest` behind Shift. A verb new to
   one of them goes on the Shift bank; one all three gain goes on the plain bank — and once
   that is full, on Shift+F3: `Author` (^O, the author's node page, `ContactPages`) rides
-  there behind `Map`, its twin about the same author.
+  there behind `Map`, its twin about the same author. `Lock` (^K, a toggle that reads
+  `Unlock` on a locked author) is the one exception, by JP's choice (2026-10-19): it sits on
+  Shift+F2 where that is free (channel, DM), and in a room, where `Log in` holds it, the
+  `Author` page carries it — a conversation opens that page with its lock row and no other
+  management verb. Its hint atom goes in only where the hint has room without dropping
+  another atom.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how

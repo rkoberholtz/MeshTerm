@@ -37,7 +37,7 @@ MeshCore companion on USB, Bluetooth, or Wi-Fi does not need them.
 | **[MeshTerm on hardware](devices/README.md)** | Start here. It says which of the manuals below is the correct one for you, and what the scripts on the device do. |
 | [MeshTerm on the PicoCalc](devices/picocalc-lyra.md) | How to change a stock ClockworkPi PicoCalc into a Linux handheld that has a LoRa radio soldered inside: the shopping list, the change to a Luckfox Lyra core, Calculinux, and the radio. |
 | [MeshTerm on the uConsole](devices/uconsole.md) | A uConsole (CM4 or CM5) with the hackergadgets AIO LoRa board. Its SX1262 is on the computer's own SPI bus. MeshTerm can control it directly with `--spi`. Or a small bridge can make it a companion for a node that is always on. |
-| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | M5Stack's Linux Cardputer: how to install MeshTerm from the app store, use the Cap LoRa-1262 radio, and try the layout in the desktop emulator. |
+| [MeshTerm on the Cardputer Zero](devices/cardputer-zero.md) | M5Stack's Linux Cardputer, the standard model or the Lite: how to install MeshTerm from the app store, use the Cap LoRa-1262 radio, and try the layout in the desktop emulator. |
 
 ## Reading the code
 
@@ -63,4 +63,7 @@ the survey does not say which.
 
 `screenshots/` has the captures that the README shows. It also has the captures from which
 [meshterm.net](https://meshterm.net) builds its landing page. Thus more than one place
-refers to each file in this folder.
+refers to each file in this folder. The folders `terminal/`, `cardputer-zero/`, and
+`picocalc-lyra/` hold the same four screens on each platform. `scripts/screenshots.py`
+makes them from the demo mesh, and they are the same at each run (refer to
+`scripts/README.md`).

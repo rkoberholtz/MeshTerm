@@ -23,7 +23,6 @@ from meshterm.ui.fontset import FONT_CODEPOINTS
 from meshterm.ui.pathline import (
     _DIM_BG,
     _DIM_FG,
-    _SELF_INK,
     _YOU_BG,
     CHIP_LIGHTNESS,
     CRACK_HEAD,
@@ -234,6 +233,15 @@ def picocalc(monkeypatch: pytest.MonkeyPatch) -> None:
     """The PicoCalc, with the chip verdict that its own font gives."""
     monkeypatch.delenv("MESHTERM_POWERLINE")
     set_platform(PICOCALC_LYRA)
+
+
+def test_the_picocalc_draws_our_chat_chip_white_on_its_fill(picocalc: None) -> None:
+    """Our chat chip has the fill of each chip of its key, and the white of slot 15."""
+    from meshterm.ui.pathline import _slot_colours
+
+    ours = _slot_colours(PathHop(f"{SELF_GLYPH} Me", key="1c", white_ink=True))
+    normal = _slot_colours(PathHop("Me", key="1c"))
+    assert ours.fill == normal.fill and ours.ink == slot_hex(15)
 
 
 def test_the_picocalc_draws_chips_from_its_eight_backgrounds(picocalc: None) -> None:
@@ -448,6 +456,31 @@ def test_cut_mark_falls_back_to_the_ellipsis_off_a_chip() -> None:
         mark = cut_mark(arrows, 6, side)
         assert mark.plain == "…"
         assert str(mark.style) == "muted"
+
+
+def test_cut_mark_cracks_only_inside_the_path_of_a_row() -> None:
+    """A cut in the text beside a chip ends in the ellipsis. A cut in a chip still cracks.
+
+    A row can be a chip, then text: the recipient of a Courier entry, then its trigger. The
+    scan for a fill once went across the text into the chip. Then the row ended in a half
+    block in the fill of the chip, at the right edge and far from the chip. The scan now
+    stays inside the path that the row stamps (``PATH_INK``).
+    """
+    row = Text()
+    row.append_text(_chips().text())
+    end = len(row.plain)
+    row.append("  when heard", style="muted")
+    after = cut_mark(row, end + 4, ELIDE_TAIL)
+    assert (after.plain, str(after.style)) == ("…", "muted")
+    inside = cut_mark(row, row.plain.index("BBBB"), ELIDE_TAIL)
+    assert inside.plain == CRACK_TAIL and str(inside.style) == _fill("22bb")
+
+    # The mirror: text before the chips, and a head cut in that text.
+    lead = Text("via ", style="muted")
+    lead.append_text(_chips().text())
+    before = cut_mark(lead, 1, ELIDE_HEAD)
+    assert (before.plain, str(before.style)) == ("…", "muted")
+    assert cut_mark(lead, lead.plain.index("AAAA"), ELIDE_HEAD).plain == CRACK_HEAD
 
 
 def test_the_elision_sits_between_chips_rather_than_being_one() -> None:
@@ -923,7 +956,7 @@ def test_bare_self_keeps_us_in_the_you_white_where_nothing_is_composed() -> None
 
     A surface that only *shows* a walk (the boards and the record card of the Trophy case)
     composes nothing. Thus there is no "not yours" to say, and our node reads in the ``you``
-    white of the app. This is the same identity colour that it has in other places. A
+    white of the app. This is the same colour that our star has in other places. A
     ``dim_from`` that reaches a star still fades it, so a mirrored return leg keeps its grey
     in both cases.
     """
@@ -933,14 +966,14 @@ def test_bare_self_keeps_us_in_the_you_white_where_nothing_is_composed() -> None
     ).text()
     stars = [s for s in text.spans if text.plain[s.start : s.end] == SELF_GLYPH]
     assert [str(s.style) for s in stars] == ["you", "you"]
-    # In chips the same identity is the yellow star of the map on the neutral dark grey. It
-    # is the marker itself and not a hue, because our end is a fixture and not a node that
-    # the user must tell from other nodes.
+    # In chips the same identity is the white star of the map on the neutral dark grey. The
+    # fill is not a hue, because our end is a fixture and not a node that the user must
+    # tell from other nodes.
     chips = path_line(
         hops, prefix_bytes=2, self_name="Me", bare_self=True, dim_self=False, mode="powerline"
     ).text()
     fills = [str(s.style) for s in chips.spans if chips.plain[s.start : s.end] == SELF_GLYPH]
-    assert fills == [f"bold {_SELF_INK} on {_YOU_BG}"] * 2
+    assert fills == [f"bold #ffffff on {_YOU_BG}"] * 2
 
     # The explicit fade still wins: a star inside a dimmed return leg stays grey.
     faded = path_line(

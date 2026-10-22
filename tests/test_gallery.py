@@ -228,7 +228,8 @@ def _contacts(cols: int, rows: int) -> Screen:
     # The archived count is not zero, so the end of the list draws both maintenance rows.
     # This is its populated state, and the widest that the end of the list gets. There is also
     # a locked contact, so that its padlock must follow the glyph contract of both platforms.
-    return ContactsScreen(
+    # The highlight is on that contact, so the lane has ``Unlock`` on the Shift half of F2.
+    screen = ContactsScreen(
         "Homestead",
         "cc" * 32,
         contacts,
@@ -237,7 +238,10 @@ def _contacts(cols: int, rows: int) -> Screen:
         sort,
         archived=12,
         locked=frozenset({"aa" * 32}),
+        can_lock=True,
     )
+    screen.handle("down")
+    return screen
 
 
 def _archive_ranked():  # noqa: ANN201
@@ -309,6 +313,21 @@ def _archive_preview(cols: int, rows: int) -> Screen:
     from meshterm.ui.sweep_screen import _preview_screen
 
     return _preview_screen(_archive_victims())
+
+
+def _archive_preview_locking(cols: int, rows: int) -> Screen:
+    """The preview with one staged lock, and the highlight on a contact row.
+
+    The Apply and Back rows then name the lock, the hint has the lock key where it has room,
+    and the lane has ``Lock`` behind ``Delete``.
+    """
+    from meshterm.ui.sweep_screen import _preview_screen
+
+    victims = _archive_victims()
+    locks = [victims.pop()]
+    screen = _preview_screen(victims, locks)
+    screen.handle("home")
+    return screen
 
 
 def _archived(cols: int, rows: int) -> Screen:
@@ -515,10 +534,17 @@ def _region_editor(cols: int, rows: int) -> Screen:
 
 
 def _chat(cols: int, rows: int) -> Screen:
-    conv = Conversation(
-        label="Alice",
-        is_channel=False,
-        contact=Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7"),
+    """A direct chat with a locked peer, so that its sender chip has the padlock of the font."""
+    from types import SimpleNamespace
+
+    from tests.conftest import recording_pages
+
+    alice = Contact(name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7")
+    conv = Conversation(label="Alice", is_channel=False, contact=alice)
+    store = SimpleNamespace(
+        is_locked=lambda dev, key: True,
+        locked_keys=lambda dev: frozenset({alice.public_key}),
+        archived=lambda dev: [],
     )
     messages = [
         ChatMessage(text="on my way, should be there soon", outbound=False, peer="d4e5f6a7"),
@@ -532,6 +558,7 @@ def _chat(cols: int, rows: int) -> Screen:
         send=None,
         names={"d4e5f6a7": "Alice"},
         session=_GallerySession(cols, rows),
+        pages=recording_pages([alice], store=store, self_key="cc" * 32),  # type: ignore[arg-type]
     )
 
 
@@ -1660,20 +1687,35 @@ def _diagnostics(cols: int, rows: int) -> Screen:
     item hangs its wrapped text under itself at any width, and this must work in 53
     columns.
     """
+    return _diagnostics_page(cols, rows, anonymized=False)
+
+
+def _diagnostics_anonymized(cols: int, rows: int) -> Screen:
+    """The Diagnostics page with its masks visible: a longer title, and the other chip."""
+    return _diagnostics_page(cols, rows, anonymized=True)
+
+
+def _diagnostics_page(cols: int, rows: int, *, anonymized: bool) -> Screen:
+    """The Diagnostics page with both forms of the document, as the tool opens it."""
+    from datetime import datetime
+
+    from meshterm.tools.diagnostics import anonymized as masked
+    from meshterm.tools.diagnostics import markdown_source
     from meshterm.ui.diagnostics import DiagnosticsPage
 
+    report = _diagnostics_report()
+    when = datetime(2026, 9, 19, 17, 0)
     return DiagnosticsPage(
-        _diagnostics_source(),
+        markdown_source(report, when=when),
         session=_GallerySession(cols, rows),
         save_path=Path("C:/Users/somebody/.meshterm/meshterm-diagnostics.md"),
+        anonymized_source=markdown_source(masked(report), when=when),
+        anonymized=anonymized,
     )
 
 
-def _diagnostics_source() -> str:
-    """A typical diagnostics document, built in the way that the tool builds one."""
-    from datetime import datetime
-
-    from meshterm.tools.diagnostics import markdown_source
+def _diagnostics_report():
+    """A typical diagnostics report, with the widest values that a real report can have."""
     from meshterm.ui import fields
     from meshterm.ui.report import Column, Facts, Lane, Listing
 
@@ -1730,7 +1772,7 @@ def _diagnostics_source() -> str:
             rows=[{"preference": "log_level", "value": "DEBUG"}],
         ),
     )
-    return markdown_source(report, when=datetime(2026, 9, 19, 17, 0))
+    return report
 
 
 def _quit_hold(cols: int, rows: int) -> Screen:
@@ -1767,6 +1809,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("contacts", _contacts),
     _Entry("archive_ladder", _archive_ladder),
     _Entry("archive_preview", _archive_preview),
+    _Entry("archive_preview_locking", _archive_preview_locking),
     _Entry("archived", _archived),
     _Entry("node_detail", _node_detail),
     _Entry("node_detail_map", _node_detail_map),
@@ -1829,6 +1872,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("share_qr", _share_qr),
     _Entry("links_qr", _links_qr),
     _Entry("diagnostics", _diagnostics),
+    _Entry("diagnostics-anonymized", _diagnostics_anonymized),
 ]
 
 #: The combinations of (platform, cols, rows) under which each entry above renders. The
@@ -1862,6 +1906,13 @@ _KNOWN_WIDE: set[str] = set()
 #: has been empty since the F-lane pass of 2026-08-08. That pass built the hint of the map
 #: again around its new view-jump keys, and the hint came back inside the budget.
 _PREEXISTING_REGULAR_OVERFLOW: set[str] = set()
+
+#: Entries whose full footer is wider than the 72 cells, by a decision, and not by a fault.
+#: The hint line removes atoms to fit (``frame.fitted_footer``), so the test measures the
+#: hint that the footer draws, and checks that it keeps its way out. Each entry names its
+#: decision. ``courier_outbox``: JP, 2026-10-22, "bring the filter back, tough luck if it
+#: doesn't fit in the footer".
+_SHEDS_ITS_HINT: set[str] = {"courier_outbox"}
 
 
 #: The specimens by name, for a test that needs one entry and not the whole sweep.
@@ -1931,6 +1982,10 @@ def test_gallery_screen_fits_its_platform(
         assert cell_len(shifted.plain) <= cols, (
             f"shifted F-lane {cell_len(shifted.plain)} cells: {shifted.plain!r}"
         )
+    elif entry.name in _SHEDS_ITS_HINT:
+        drawn = Text.from_markup(frame.fitted_footer(screen, cols)).plain
+        assert cell_len(drawn) <= cols, f"the fitted footer is {cell_len(drawn)} cells: {drawn!r}"
+        assert drawn.endswith(screen.footer_hint.rsplit(" · ", 1)[-1]), "the way out was lost"
     else:
         footer_plain = Text.from_markup(screen.footer_hint).plain
         assert cell_len(footer_plain) <= cols, (

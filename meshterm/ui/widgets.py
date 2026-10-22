@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -46,6 +46,7 @@ from ..core.models import (
 from ..platforms import Platform, on_platform
 from .marks import (
     DST_NODE,
+    LOCK_ICON,
     NODE_MARK,
     REPEATER_MARK,
     RGB,
@@ -172,7 +173,7 @@ def banner(
     body = Text.from_markup(
         f"[brand]MeshTerm[/brand] [muted]v{__version__}[/muted]\n[muted]device:[/muted] {target}"
     )
-    return Panel(body, border_style="accent", expand=False, title="[accent]Mesh[/accent]")
+    return Panel(body, border_style="border", expand=False, title="[title.border]Mesh[/]")
 
 
 def make_progress(console: Console) -> Progress:
@@ -683,6 +684,149 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
+def author_chip(name: str, key: str | None, *, locked: bool = False, picked: bool = False) -> Text:
+    """The author of a message in a chat: the chip of the node, which closes on the point.
+
+    It is :func:`name_chip` with the role of an origin, and one difference: a node that no
+    key can place has the quiet chip of a chat, the grey of plain text on a darker grey
+    (refer to :attr:`~meshterm.ui.pathline.PathHop.quiet`). The transcript and the
+    Messages list draw each sender through this function.
+
+    A locked contact has the padlock before its name, in the chip: ``🔒 Name`` (JP,
+    2026-10-19). It is the same place as the ``★`` of our own chip (refer to
+    :func:`self_chip`), and the same padlock as the row of the contact in the Contacts list
+    (:data:`~meshterm.ui.marks.LOCK_ICON`, ``⚿`` on the PicoCalc).
+
+    Args:
+        name: The name as it must read.
+        key: Any known prefix of the key of the node, or ``None``.
+        locked: Whether the author is a contact that is locked against the archive sweep.
+        picked: Whether the selected message of the chat is in the group of this chip.
+            Then the label is white (refer to :func:`picked_hop`).
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    label = f"{glyph(LOCK_ICON)} {name}" if locked else name
+    hop = PathHop(label, key=key or None, quiet=True)
+    return hop_chip(picked_hop(hop) if picked else hop, role=ORIGIN)
+
+
+def self_chip(name: str | None, key: str | None, *, role: str | None = None) -> Text:
+    """Our node as the sender in a chat: ``★ Name``, in white, on the chip of our key.
+
+    A chat (a channel, a direct chat, a room) names each sender, and our node too. A route
+    shows our end as the bare ``★``, because the user never has to be told who that is. A
+    chat is a conversation between names, so our messages go under our name (JP,
+    2026-10-13). Two things make it different from the name of each other node. The ``★``
+    of the app comes first. Also, the label is white: the fill is the fill of each known
+    sender, the darker hue of our key, and the other senders have their hue as the label
+    (refer to :attr:`~meshterm.ui.pathline.PathHop.white_ink`, JP, 2026-10-14). Before,
+    the chip was turned over, dark on a light fill of our hue. A star on the page to the
+    right of the chip was also tried, and JP put it back in the chip (2026-10-13). The
+    PicoCalc draws the same pair, white on the dim twin of our hue.
+
+    A mention of our name is a different mark (refer to :func:`mention_chip`). The chip is
+    the same white on our fill, but it has no star. The message that names us has our
+    white ``★`` at the left of its time (refer to :func:`mention_mark`).
+
+    Our node with no name or no key (the device did not report them) keeps the bare ``★``
+    chip of a route.
+
+    Args:
+        name: The name of our node.
+        key: Our public key, which gives the hue.
+        role: :data:`ORIGIN`, :data:`DESTINATION`, or ``None``, as for :func:`name_chip`.
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    if not name or not key:
+        return name_chip("", you=True, role=role)
+    return hop_chip(PathHop(f"{SELF_GLYPH} {name}", key=key, white_ink=True), role=role)
+
+
+def mention_mark(key: str | None) -> Text:
+    """The mark of a message that names us: the white ``★`` of our node.
+
+    The chat puts it at the left of the time of each message that mentions our name, and
+    the Messages list puts it at the left of the age of a row whose last message does (JP,
+    2026-10-13). It is the star of our node in the rest of the app
+    (:data:`~meshterm.ui.marks.SELF_MARK`), white, the same as the label of the chip that
+    the mention has in the body. It is the same on each platform, and with chips or
+    without them. JP tried the yellow star of the map, the notch and the point of our chip,
+    the point alone, and the star in our hue, and kept this one (2026-10-14).
+
+    Args:
+        key: Our public key. With ``None``, the star has the keyless grey, the same as the
+            chip of the mention.
+
+    Returns:
+        The mark, one cell wide. The caller puts a space after it.
+    """
+    if not key:
+        return Text(SELF_GLYPH, style="node.unknown")
+    return Text(SELF_MARK[0], style=SELF_MARK[1])
+
+
+def mention_hop(name: str, key: str | None, *, you: bool = False) -> PathHop:
+    """The hop of a mention: the node that a message names, as its chip shows it.
+
+    Where the terminal draws chips, the label is the name alone. The chip already says
+    that the name is a mention, so the ``@`` is not necessary (JP, 2026-10-13). In arrow
+    mode there is no chip, and the label keeps its ``@``. Without it, a mention is only a
+    word in a colour.
+
+    Args:
+        name: The name that the mention gives.
+        key: Any known prefix of the key of the node, which selects the hue. ``None`` is a
+            node that MeshTerm cannot place, and it has the keyless grey.
+        you: ``True`` if the mention names our node. Its label is white, the same as the
+            chip of our messages (refer to :func:`self_chip`), but it has no star.
+
+    Returns:
+        The hop. A caller can change it before it draws it (the compose line draws the
+        chip under the cursor in the white of the insertion slot).
+    """
+    label = name if powerline_enabled() else f"@{name}"
+    return PathHop(label, key=key or None, white_ink=you and bool(key), quiet=True)
+
+
+def picked_hop(hop: PathHop) -> PathHop:
+    """``hop`` on the selected message of a chat: its label in the white of the selection.
+
+    The text of the selected message is white (``cursor``), and its chips follow it: the
+    mentions in its body, and the author chip of its group (JP, 2026-10-19). A chip keeps
+    its fill, so it still tells one node from the next, and only its label turns white: the
+    white label of our own chip (:attr:`~meshterm.ui.pathline.PathHop.white_ink`). Arrow
+    mode has no fill, so there the label takes the ``cursor`` white, as each other name on a
+    selected row does.
+
+    A node that no key can place turns white too. Its grey fill already says that the node
+    is unknown (JP, 2026-10-19), and white on that fill reads better than its black label.
+    This is different from the white fold of a list row (refer to
+    :func:`~meshterm.ui.tui.render._whiten_identities`), where a grey name has no fill to
+    keep the grey. A hop that already has a white label stays as it is.
+    """
+    if hop.white_ink:
+        return hop
+    if powerline_enabled():
+        return replace(hop, white_ink=True)
+    return replace(hop, style="cursor")
+
+
+def mention_chip(name: str, key: str | None, *, you: bool = False) -> Text:
+    """A mention in a message: the chip of the node that it names, which opens on the notch.
+
+    The node that a mention names is the destination of a route from the author of the
+    message (refer to :data:`DESTINATION`). The arguments are those of :func:`mention_hop`.
+
+    Returns:
+        The chip as a one-line :class:`Text`.
+    """
+    return hop_chip(mention_hop(name, key, you=you), role=DESTINATION)
+
+
 def _shorten_hash(value: str, hash_bytes: int | None) -> str:
     """Return ``value`` as bare hex truncated to ``hash_bytes`` bytes.
 
@@ -998,18 +1142,16 @@ def stats_panel(
             _hop_medians_table(stats.hop_snrs, device_label, resolve, hash_bytes, device_hash)
         )
     body: Text | Group = sections[0] if len(sections) == 1 else Group(*sections)
-    return Panel(body, title="[accent]Trace summary[/accent]", border_style="accent", expand=False)
+    return Panel(body, title="[title.border]Trace summary[/]", border_style="border", expand=False)
 
 
 # The glyphs and colours of the node types. They are the same as the marker palette of the
-# map in the whole app (refer to ui.map_render). Our node is the yellow ``★``, plain nodes
-# are the loud pink ``●``, and repeaters are the calmer violet ``▲``. The other types have
-# hues that are safe on the map and different from those: a white square for rooms (the
-# house glyph was difficult to read) and an orange dot with a ring for sensors. All are
-# single-width BMP glyphs, so the columns stay aligned. The colours are the ``type.*``
-# entries of the theme and not raw hex. Thus the 16-slot console chooses its slot on
-# purpose (otherwise the violet downsamples to grey, and a repeater looks like an unknown
-# node). On the regular platform, they *are* the hues of the map.
+# map in the whole app (refer to ui.map_render). Our node is the ``★``, plain nodes are a
+# ``●``, repeaters are a ``▲``, rooms are a square (the house glyph was difficult to read),
+# and sensors are a dot with a ring. All are white, and the shape tells the type (JP,
+# 2026-10-14). All are single-width BMP glyphs, so the columns stay aligned. The colours
+# are the ``type.*`` entries of the theme and not raw hex, so that the 16-slot console
+# chooses its own white, and so that one type can get a colour again in one place.
 NODE_GLYPHS: dict[int, tuple[str, str]] = {
     NODE_TYPE_REPEATER: (REPEATER_MARK[0], "type.repeater"),
     NODE_TYPE_ROOM: ("■", "type.room"),
@@ -1035,8 +1177,8 @@ def node_marker(node_type: int | None) -> tuple[str, RGB]:
 
 
 def self_marker() -> tuple[str, RGB]:
-    """The map marker of our node, the yellow ``★``, as a ``(glyph, rgb)`` pair."""
-    return SELF_MARK[0], parse_hex(SELF_MARK[1])
+    """The map marker of our node, the white ``★``, as a ``(glyph, rgb)`` pair."""
+    return SELF_MARK[0], mark_rgb(SELF_MARK[1])
 
 
 # A heat-map gradient for the heard age of a node, from the hottest (heard most recently) to
@@ -1049,10 +1191,10 @@ _HEAT_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
     (math.log10(3600), (250, 204, 21)),  # ~1h: yellow
     (math.log10(21600), (251, 146, 60)),  # ~6h: orange
     (math.log10(86400), (248, 113, 113)),  # ~1d: red
-    (math.log10(604800), (148, 163, 184)),  # ~1w: grey
-    (math.log10(2592000), (100, 116, 139)),  # ~30d+: cold slate
+    (math.log10(604800), (162, 162, 162)),  # ~1w: grey
+    (math.log10(2592000), (115, 115, 115)),  # ~30d+: cold grey
 )
-_RECENCY_NEVER = "#64748b"  # never heard: the coldest slate
+_RECENCY_NEVER = "#737373"  # never heard: the coldest grey
 
 
 def age_seconds(when: datetime | None) -> float | None:
@@ -1128,7 +1270,7 @@ def _recency_gradient(secs: float | None) -> str:
 
     The function interpolates the RGB channels between the two stops on each side of
     ``secs`` (in log-age space). Below the first stop, it gives white. Above the last stop,
-    it gives cold slate.
+    it gives cold grey.
     """
     if secs is None:
         return _RECENCY_NEVER
@@ -1404,8 +1546,9 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     This is the only navigation header for a screen that shows one view of the full height
     at a time, between a few named views (for example ``Info`` and ``Routes`` on the node
     detail page), and does not stack them. Each tab always has a box with a full top. The
-    box has a dim ``faint`` outline by default, and a lit ``accent`` outline when the tab
-    is active. It is not only the active tab that has a box. Thus the width of each tab is
+    box has a dim ``faint`` outline by default, and the grey ``border`` outline when the
+    tab is active. The label of the active tab is lit as the title of a panel is
+    (``title.border``). It is not only the active tab that has a box. Thus the width of each tab is
     fixed, in any selection, and a switch of tabs never shifts the labels that follow it.
     Neighbouring tabs share a vertical line (one glyph, not two). Each shared *top* corner
     is drawn as if the tab on the left sits on top of the tab on the right. It "opens"
@@ -1414,7 +1557,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     left) in all other places. Thus the active tab is the one exception. It always wins both
     of its top corners, and it looks lifted in front of its neighbours.
 
-    The *bottom* border is a single continuous rule with the accent colour. It is one line,
+    The *bottom* border is a single continuous rule in the colour of the border. It is one line,
     so it has one colour throughout, the colour of the active tab. The inactive tabs sit
     flush against it. They have no corners or seams of their own there. The rule only
     passes behind them. It is broken only under the active tab, and thus the tab looks
@@ -1422,7 +1565,7 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     from the west, and turns north into the wall of the tab). It leaves the width of the
     active tab open (no line, because that gap *is* the start of the page). Then it turns
     back down through ``╰`` (the wall meets the flat run that continues east) and goes on
-    flat. A lone tab becomes the plain accent heading (the ``── Label ──`` form of
+    flat. A lone tab becomes a plain heading in the border grey (the ``── Label ──`` form of
     :func:`~meshterm.ui.menus.section_heading`), because there is nothing to switch
     between or to layer. When ``width`` has more space than necessary, the tab boxes (the
     top row and the label row) are two columns from the left. The bottom rule is one
@@ -1450,18 +1593,20 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
     if not labels:
         return Group(Text(""))
     if len(labels) == 1:
-        return Group(Text(f"── {labels[0]} ──", style="accent", no_wrap=True))
+        return Group(Text(f"── {labels[0]} ──", style="border", no_wrap=True))
     if compact:
-        row = Text("──", style="accent", no_wrap=True)
+        row = Text("──", style="border", no_wrap=True)
         for i, label in enumerate(labels):
             if i == active:
-                row.append(f"┤ {label} ├", style="accent")
+                row.append("┤ ", style="border")
+                row.append(label, style="title.border")
+                row.append(" ├", style="border")
             else:
-                row.append("─", style="accent")
+                row.append("─", style="border")
                 row.append(f" {label} ", style="faint")
-                row.append("─", style="accent")
-            row.append("─", style="accent")
-        row.append("─" * max(0, width - len(row.plain)), style="accent")
+                row.append("─", style="border")
+            row.append("─", style="border")
+        row.append("─" * max(0, width - len(row.plain)), style="border")
         return Group(row)
 
     n = len(labels)
@@ -1475,14 +1620,14 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
         return junction if junction == 0 or junction == active else junction - 1
 
     def top_style(junction: int) -> str:
-        return "accent" if top_owner(junction) == active else "faint"
+        return "border" if top_owner(junction) == active else "faint"
 
     def bot_glyph(junction: int) -> str:
         """The glyph of the bottom rule at this junction.
 
         It is a corner that turns into or out of the wall of the active tab, or else a flat
-        pass-through. It always has the accent colour. Refer to the enclosing docstring for
-        the reason.
+        pass-through. It always has the colour of the border. Refer to the enclosing docstring
+        for the reason.
         """
         if junction == active:
             return "╯"
@@ -1492,20 +1637,19 @@ def tab_strip(labels: Sequence[str], active: int, width: int, *, compact: bool =
 
     top = Text(pad, no_wrap=True)
     mid = Text(pad, no_wrap=True)
-    bot = Text("─" * margin, style="accent", no_wrap=True)
+    bot = Text("─" * margin, style="border", no_wrap=True)
     for i, _label in enumerate(labels):
         opens = i == 0 or i == active
         top.append("╭" if opens else "╮", style=top_style(i))
         mid.append("│", style=top_style(i))
-        bot.append(bot_glyph(i), style="accent")
-        tab_style = "accent" if i == active else "faint"
-        top.append("─" * len(inner[i]), style=tab_style)
-        mid.append(inner[i], style=tab_style)
-        bot.append(" " * len(inner[i]) if i == active else "─" * len(inner[i]), style="accent")
+        bot.append(bot_glyph(i), style="border")
+        top.append("─" * len(inner[i]), style="border" if i == active else "faint")
+        mid.append(inner[i], style="title.border" if i == active else "faint")
+        bot.append(" " * len(inner[i]) if i == active else "─" * len(inner[i]), style="border")
     top.append("╮", style=top_style(n))
     mid.append("│", style=top_style(n))
-    bot.append(bot_glyph(n), style="accent")
-    bot.append("─" * max(0, width - len(bot.plain)), style="accent")
+    bot.append(bot_glyph(n), style="border")
+    bot.append("─" * max(0, width - len(bot.plain)), style="border")
     return Group(top, mid, bot)
 
 
@@ -1668,7 +1812,7 @@ def tx_opt_summary(result: TxOptResult) -> Panel:
         Text.from_markup(applied),
     )
     return Panel(
-        body, title="[accent]TX optimization[/accent]", border_style="accent", expand=False
+        body, title="[title.border]TX optimization[/]", border_style="border", expand=False
     )
 
 

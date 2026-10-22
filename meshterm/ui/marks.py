@@ -27,20 +27,22 @@ def parse_hex(color: str) -> RGB:
     return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
 
 
-# The palette of markers, shared in the whole app. The basemap is blue (water), green
-# (parks), and warm amber (roads). Thus the markers use the hues that a map never has,
-# pink and violet, so that they are easy to see against it. Ordinary nodes are the
-# loudest (bright pink). Repeaters are less loud (a calmer violet). Our node is always the
-# yellow star. A node that was heard but never identified is a light grey ring. Each glyph
-# is in the PicoCalc console font.
+# The palette of markers, shared in the whole app. Each marker is white, and its shape
+# tells what it is (JP, 2026-10-14): a ``●`` for an ordinary node and a ``▲`` for a
+# repeater, in the ``type.*`` white of the theme. They were pink and violet, the hues that
+# a map never has. Our node is the star, in the white of ``you`` (JP, 2026-10-14). It was
+# yellow, and then the hue of our key. A node that was heard but never identified is a
+# light grey ring. Each glyph is in the PicoCalc console font.
 #
 # The colour of a mark is any value that :func:`~meshterm.ui.theme.mark_rgb` takes: a
 # literal hex, or the name of a theme style when the platform must choose the shade. The
 # unknown ring has a name (``node.unknown``), so that the ring and the grey label beside
-# it can never be different.
-SELF_MARK = ("★", "#facc15")
-REPEATER_MARK = ("▲", "#a78bfa")
-NODE_MARK = ("●", "#f472b6")
+# it can never be different. Our star has the name ``you``, the white of our node in each
+# list, and the two type marks have their ``type.*`` names, so that the console chooses
+# its own white.
+SELF_MARK = ("★", "you")
+REPEATER_MARK = ("▲", "type.repeater")
+NODE_MARK = ("●", "type.node")
 UNKNOWN_MARK = ("○", "node.unknown")
 
 #: The only concealed character. One bullet replaces one character of a value that the
@@ -49,6 +51,15 @@ UNKNOWN_MARK = ("○", "node.unknown")
 #: same meaning where it appears. It is *not* the ``●`` of an unread message or a node, on
 #: purpose. Those marks have a meaning, and this one means "not shown".
 MASK_MARK = "•"
+
+#: The padlock of a locked contact: at the start of its row in the Contacts list, and before
+#: its name on its sender chip in a chat. It is the private-channel ``🔒`` of the icon
+#: lexicon, because it means the same thing (this item is closed to something). It goes
+#: through :func:`~meshterm.ui.theme.glyph`, which gives the hand-drawn padlock ``⚿`` of the
+#: font on the PicoCalc. An unlocked contact draws nothing. The mark is an exception that
+#: the user must notice, and a lane of open padlocks makes the few closed padlocks hard to
+#: see.
+LOCK_ICON = "🔒"
 
 #: Sentinels that name the endpoints of a path on the route graph. ``\x00`` never occurs
 #: in a node hash, so the sentinels can share the namespace of node ids and not collide

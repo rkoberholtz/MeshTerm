@@ -138,7 +138,7 @@ the route that agrees with how you installed MeshTerm.
   (refer to [Step 3](#step-3-install-meshterm)):
 
   ```bash
-  pip install 'mesh-term[spi]'
+  pip install 'mesh-term[spi] @ git+https://github.com/jpmartineau/MeshTerm'
   ```
 
 - **Do you run the one-file Linux ARM64 build?** It is a single frozen binary, and it
@@ -181,7 +181,7 @@ pipx inject mesh-term 'openhop-core[hardware]'
 Or use `pip`, which adds the radio library as its own extra in one line:
 
 ```bash
-pip install 'mesh-term[spi]'
+pip install 'mesh-term[spi] @ git+https://github.com/jpmartineau/MeshTerm'
 ```
 
 ---
@@ -227,7 +227,8 @@ the mesh. On Device config, **Identity key…** shows the key, exports it, and i
 one, as for each companion. An export has the form that a firmware companion uses: 64
 bytes, or 128 hex digits. When the node makes its own key, it keeps a shorter form in
 `identity.key`: a 32-byte seed. The two forms are the same identity, and an import accepts
-each of them. The node reads its key only when it starts. Thus, after an import, MeshTerm
+each of them. MeshTerm saves an imported key in the form that you give, so an imported
+seed stays a seed. The node reads its key only when it starts. Thus, after an import, MeshTerm
 restarts the node, and the reconnect dialog shows until the node is ready again.
 
 **A profile, if you want a name for the connection:**

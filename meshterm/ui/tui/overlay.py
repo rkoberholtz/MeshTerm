@@ -31,16 +31,16 @@ from rich.text import Text
 from .render import render_to_ansi
 from .spinner import Spinner
 
-#: The colour of the title line (the theme's ``title.accent``, in hex so that the fade can
-#: dim it).
-_TITLE_COLOR = "bold #a5b4fc"
+#: The colour of the title line (the theme's ``title.border``, in hex so that the fade can
+#: dim it). It is the title of a dialog, which the card stands in for.
+_TITLE_COLOR = "bold #d4d4d4"
 
 #: The colour of the working chip (the theme's ``accent``). The chip has the same one-cell
 #: spinner as the other dialogs.
 _CHIP_COLOR = "bold #818cf8"
 
 #: The colour of the caption (the theme's ``muted``, in hex so that the fade can dim it).
-_CAPTION_COLOR = "#94a3b8"
+_CAPTION_COLOR = "#a2a2a2"
 
 
 class BusyOverlay:

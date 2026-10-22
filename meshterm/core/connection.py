@@ -52,11 +52,13 @@ from .models import (
     advert_time,
     utcnow,
 )
+from .privatekey import normalize as normalize_key
 from .region_sim import SimulatedRegionMap
 from .regions import WILDCARD as REGION_WILDCARD
 from .regions import normalize as normalize_region
 from .regions import parse_region_list, region_key
 from .regions import validate as validate_region
+from .secrets import remember as remember_secret
 from .tracing import path_hash_flags, trace_timeout
 from .transmit_lock import TransmitLock
 
@@ -1237,8 +1239,8 @@ class Device(ABC):
         never opens a new handle. Thus the interactive session can poll it while the device
         is in use, to find a lost link during the session (a serial cable pulled, a
         companion powered off, a BLE peripheral out of range). Each transport uses the
-        signal that correctly shows its link state (the OS port list for serial, the
-        connection flag of the BLE client for Bluetooth). It returns ``True`` when it
+        signal that correctly shows its link state (the connection flag of the client, and
+        for serial also the OS port list). It returns ``True`` when it
         cannot find the presence, so a short lookup problem never gives a false disconnect.
 
         Returns:
@@ -2020,9 +2022,12 @@ class Device(ABC):
     async def import_private_key(self, key_hex: str) -> None:
         """Import a private key, and replace the identity of the device with it.
 
+        Each device takes the form that it keeps. A firmware companion accepts only the
+        64-byte key, so it expands a seed first (:func:`meshterm.core.privatekey.normalize`).
+        The node of an SPI radio keeps the form that it gets.
+
         Args:
-            key_hex: The 64-byte key in hex, as :func:`meshterm.core.privatekey.normalize`
-                makes it. A caller that has a seed expands it first.
+            key_hex: The key in hex: the 64-byte key, or a 32-byte seed.
         """
 
     @abstractmethod
@@ -2112,6 +2117,15 @@ class MeshCoreDevice(Device):
         self._ble_device = ble_device
         self._host = host
         self._tcp_port = tcp_port
+        if host:
+            # No pattern can find a host name in a log line. Thus each host that MeshTerm
+            # opens is registered here, and the ``anonymize`` preference can mask it.
+            from .anonymize import remember_host
+
+            remember_host(host)
+        # The pairing PIN is a secret. No log may repeat it (refer to
+        # meshterm.core.secrets), so it is registered before the first connect.
+        remember_secret(pin)
         self._mc = None  # type: ignore[var-annotated]  # meshcore.MeshCore
         #: The ``bleak.BleakClient`` of a BLE link. MeshTerm keeps it because ``meshcore``
         #: releases its own reference at the moment the peripheral disappears. Refer to
@@ -3076,15 +3090,22 @@ class MeshCoreDevice(Device):
     async def link_present(self) -> bool:  # noqa: D102 - inherited docstring
         if self._mc is None:
             return True  # not connected yet, or torn down already: nothing to declare lost
+        # The meshcore client sets ``is_connected`` to False at the moment the transport is
+        # lost (bleak's disconnect callback for BLE, a broken socket for TCP, a fatal read
+        # or write error for serial). Thus it is a fast liveness read that does not transmit.
+        try:
+            connected = bool(self._mc.is_connected)
+        except Exception:  # noqa: BLE001 - a status hiccup must not fake a disconnect
+            connected = True
         if self._transport in ("ble", "tcp"):
-            # The meshcore client sets ``is_connected`` to False at the moment the transport
-            # is lost (bleak's disconnect callback for BLE, a broken socket for TCP). Thus
-            # this is the network and Bluetooth equivalent of the check of the serial port
-            # list: a fast liveness read that does not transmit.
-            try:
-                return bool(self._mc.is_connected)
-            except Exception:  # noqa: BLE001 - a status hiccup must not fake a disconnect
-                return True
+            return connected
+        # A serial port can stay listed after its link is dead. When a laptop wakes from
+        # sleep, the kernel can reset the USB device and hang up the open port, but it keeps
+        # the same device file. The next write fails with EIO, and the serial transport
+        # closes itself. Before we checked this flag, the port list alone said that the link
+        # was up, so no reconnect dialog opened, and each command failed (GitHub issue #32).
+        if not connected:
+            return False
         if not self._port:
             return True  # no port stored (it should not occur after a connect): cannot tell
         # Run this off the event loop, as all the other callers of the port walk do. On the
@@ -3204,7 +3225,9 @@ class MeshCoreDevice(Device):
             result = await mc.commands.send_device_query()
         except Exception:  # noqa: BLE001 - older firmware has no query: unknown, not fatal
             return {}
-        return dict(getattr(result, "payload", {}) or {})
+        payload = dict(getattr(result, "payload", {}) or {})
+        remember_secret(payload.get("ble_pin"))  # the PIN with which a phone pairs
+        return payload
 
     #: The maximum silence of the contacts stream before MeshTerm considers a read as
     #: failed (seconds). The library's own ``get_contacts`` arms one future for the *full*
@@ -3474,6 +3497,9 @@ class MeshCoreDevice(Device):
         """
         from meshcore import EventType
 
+        # Each password that MeshTerm sends is a secret that no log may repeat (refer to
+        # meshterm.core.secrets): an admin password, a room password, or a guess.
+        remember_secret(password)
         mc = self._require()
         pub = self._node_pubkey(node)
         loop = asyncio.get_running_loop()
@@ -4393,6 +4419,7 @@ class MeshCoreDevice(Device):
             raise DeviceCommandError(f"channel read for slot {index} returned slot {got}")
         if not payload.get("channel_name"):
             return None
+        remember_secret(payload.get("channel_secret"))
         return payload
 
     async def _channel_event(self, index: int):  # noqa: ANN202 - a meshcore Event
@@ -4582,6 +4609,7 @@ class MeshCoreDevice(Device):
         key = payload.get("private_key")
         if key is None:
             raise RuntimeError("device did not return a private key (export may be disabled)")
+        remember_secret(key)
         return key.hex() if isinstance(key, (bytes, bytearray)) else str(key)
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102
@@ -4592,7 +4620,7 @@ class MeshCoreDevice(Device):
         # error, thus it waited for its full timeout and returned a refusal with no cause.
         # This call waits for the third answer too, and names it.
         event = await self._require().commands.send(
-            b"\x18" + bytes.fromhex(key_hex),
+            b"\x18" + normalize_key(bytes.fromhex(key_hex)),
             [EventType.OK, EventType.ERROR, EventType.DISABLED],
         )
         if getattr(event, "type", None) == EventType.DISABLED:
@@ -5437,7 +5465,8 @@ class MockDevice(Device):
         return self._private_key
 
     async def import_private_key(self, key_hex: str) -> None:  # noqa: D102
-        self._private_key = bytes.fromhex(key_hex).hex()  # checks the hex, and normalizes it
+        # As a firmware does: it keeps only the 64-byte key, so a seed is expanded.
+        self._private_key = normalize_key(bytes.fromhex(key_hex)).hex()
 
     async def factory_reset(self) -> None:  # noqa: D102 - inherited docstring
         self._custom_vars.clear()
@@ -6012,6 +6041,7 @@ def make_device(
     tcp_port: int | None = None,
     spi: SpiWiring | None = None,
     state: Path | None = None,
+    demo: bool = False,
 ) -> Device:
     """Make the correct :class:`Device` for the current run.
 
@@ -6037,6 +6067,8 @@ def make_device(
         state: The state directory of the SPI radio (refer to
             :func:`meshterm.core.spiradio.state_dir`). It is necessary when
             ``transport="spi"``.
+        demo: With ``mock``, return the simulator of the demo world
+            (:class:`~meshterm.demo.device.DemoDevice`) instead of the test world.
 
     Returns:
         A :class:`Device` instance that connects when you enter it.
@@ -6045,6 +6077,10 @@ def make_device(
         ValueError: If a real device is requested without an endpoint that its transport
             can use.
     """
+    if mock and demo:
+        from ..demo.device import DemoDevice  # deferred: the demo builds on this module
+
+        return DemoDevice()
     if mock:
         return MockDevice(optimal_tx=mock_optimal_tx)
     if transport == "ble":

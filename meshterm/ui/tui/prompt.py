@@ -187,7 +187,12 @@ class LineEditor:
         return i
 
     def render(
-        self, mask: bool = False, *, overflow_at: int | None = None, slots: int | None = None
+        self,
+        mask: bool = False,
+        *,
+        overflow_at: int | None = None,
+        slots: int | None = None,
+        compose: bool = False,
     ) -> Text:
         """Render the current line with a reverse-video cursor cell.
 
@@ -200,20 +205,46 @@ class LineEditor:
             slots: When set, render exactly this number of fixed positions (a masked PIN
                 field). A typed position shows a bullet, and a blank position shows a muted
                 centre dot. This argument has priority over ``mask`` and ``overflow_at``.
+            compose: When ``True``, draw the line as the compose line of a chat draws it:
+                the ``›`` in the ``cursor`` white and the text in the ``compose`` white
+                (refer to :meth:`~meshterm.ui.compose.MentionEditor.render_line`). Thus a
+                message that the user writes outside a chat looks the same as in a chat.
         """
         if slots is not None:
             return self._render_slots(slots)
         shown = MASK_MARK * len(self.text) if mask else self.text
-        text = Text("› ", style="accent")
-        for i, ch in enumerate(shown):
-            over = overflow_at is not None and i >= overflow_at
-            if i == self.cursor:
-                text.append(ch, style="err.reverse" if over else "reverse")
-            else:
-                text.append(ch, style="err" if over else None)
+        if compose:
+            # The style goes on the ``›`` alone, as in the chat. As the base style of the
+            # line, it also colours the typed text, and the compose white is then bold.
+            text = Text()
+            text.append("› ", style="cursor")
+        else:
+            text = Text("› ", style="accent")
+        self._append_run(text, shown, 0, len(shown), overflow_at, "compose" if compose else None)
         if self.cursor >= len(shown):  # cursor past the last character → trailing block
             text.append(" ", style="reverse")
         return text
+
+    def _append_run(
+        self,
+        text: Text,
+        shown: str,
+        start: int,
+        end: int,
+        overflow_at: int | None,
+        style: str | None = None,
+    ) -> None:
+        """Append the characters ``shown[start:end]`` to ``text``, one cell for each character.
+
+        The character at the cursor is in reverse video. Each character at or after
+        ``overflow_at`` is in the error style. Each other character has ``style``.
+        """
+        for i in range(start, end):
+            over = overflow_at is not None and i >= overflow_at
+            if i == self.cursor:
+                text.append(shown[i], style="err.reverse" if over else "reverse")
+            else:
+                text.append(shown[i], style="err" if over else style)
 
     def _render_slots(self, slots: int) -> Text:
         """Render a fixed-width masked field: filled bullets and centred dots for blanks.
@@ -277,6 +308,7 @@ class TextScreen(_KeylessDialog):
         help_text: str = "",
         password: bool = False,
         byte_limit: int | None = None,
+        compose: bool = False,
         footer_hint: str = "Enter accept · Esc cancel",
     ) -> None:
         """Build a text prompt.
@@ -296,6 +328,8 @@ class TextScreen(_KeylessDialog):
                 submission when the text is longer than the limit. Use it for a field that
                 feeds a packet with a size limit (a direct message, a courier entry). Keep
                 ``None`` for a field with no limit.
+            compose: When ``True``, the field is a message, and it has the colours of the
+                compose line of a chat (refer to :meth:`LineEditor.render`).
             footer_hint: The key hint in the footer.
         """
         super().__init__()
@@ -307,6 +341,7 @@ class TextScreen(_KeylessDialog):
         self._help = help_text
         self._password = password
         self._byte_limit = byte_limit
+        self._compose = compose
         self._error = ""
 
     @property
@@ -342,7 +377,7 @@ class TextScreen(_KeylessDialog):
         if self._prompt:
             parts.append(Text(self._prompt))
             parts.append(Text(""))
-        field = self._editor.render(mask=self._password)
+        field = self._editor.render(mask=self._password, compose=self._compose)
         if self._byte_limit is not None:
             # The gauge pins to the right edge of the field: a steady fuel gauge in the corner,
             # exactly as the chat compose bar draws it (both through ``byte_counter``).
@@ -523,7 +558,7 @@ class ButtonDialog(_KeylessDialog):
         prompt_style: str = "",
         button_style: str = "selected",
         button_idle_style: str = "muted",
-        border_style: str = "accent",
+        border_style: str = "border",
         lane: Sequence[FPair | None] | None = None,
     ) -> None:
         """Build a button dialog.

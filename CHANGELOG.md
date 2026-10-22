@@ -9,6 +9,204 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-10-22
+
+**The Courier outbox is a table, and Enter opens the message of an entry.** Each section of
+the outbox has column headers, and each row shows its full message. A table that is wider
+than the screen pans with ←→, and does not cut its rows. A footer hint that is too wide
+keeps its Esc.
+
+### Changed
+
+- **The Courier outbox is a table with column headers.** A waiting entry shows TARGET,
+  TRIGGER, and MESSAGE. A finished entry shows TARGET, OUTCOME, and MESSAGE. Nothing is
+  shortened to fit. When the table is wider than the screen, ←→ pan the rows and their
+  headers together, and the footer says so. The column headers stay at the top with their
+  section heading while the section scrolls. Typing still narrows the outbox.
+- **Enter on a Courier entry opens its message.** On a waiting entry, Enter opens the
+  message so that you can edit it. The courier holds the entry while the prompt is open, so
+  the old text cannot go out while you edit. On a finished entry, Enter shows the message.
+  The menu of an entry is gone: ^R sends a waiting entry now, and Del deletes an entry after
+  a red confirm. On the PicoCalc and the Cardputer Zero, `Send` is on F3, with `Delete`
+  behind it on Shift+F3.
+- The message field of the Courier has the colours of the chat's compose line: a white
+  prompt mark and white text.
+
+### Fixed
+
+- **A footer hint that is too wide keeps its Esc.** The footer line cut a hint that was too
+  wide at the right edge, and Esc, the last atom of each hint, went with the cut. Now the
+  footer removes atoms in front of Esc, as the splash already did.
+- **A cut in the text next to a chip ends on an ellipsis.** When a row had a chip and then
+  text, and the text ran past the screen, the cut drew a half block in the colour of the
+  chip at the right edge. Now the half block is only for a cut inside a path, and a cut in
+  plain text ends on `…`.
+
+## [0.11.4] - 2026-10-20
+
+**You can lock a contact from more places, and a serial radio that stops when your laptop
+wakes from sleep opens the reconnect dialog.** In the archive preview, ⇧Del keeps a contact
+out of each sweep that follows. In a conversation and on the Contacts list, ^K locks a
+contact or unlocks it, and a locked sender has a padlock on its chip. The battery gauge of
+the Cardputer Zero stays on with the Cap.
+
+### Added
+
+- **In the archive preview, Shift+Delete keeps a contact out of the sweep and locks it.**
+  Delete keeps a contact out of this sweep only. ⇧Del also locks the contact, so that no
+  sweep that follows can take it. MeshTerm writes the lock when you select Apply, with the
+  archive. Esc and Back ask before they discard a lock that is not written yet. If you lock
+  each contact in the preview, Apply only writes the locks. On the PicoCalc and the
+  Cardputer Zero, `Lock` is on Shift+F3, behind `Delete`.
+- **^K locks the author of a message in a channel, a direct chat, and a room.** Select a
+  message and press ^K. Press it again to unlock the author. The status line tells you what
+  the key did. On the PicoCalc and the Cardputer Zero, `Lock` is on Shift+F2 in a channel
+  and in a direct chat. In a room, Shift+F2 is `Log in`, so there the page of the author
+  (Shift+F3) has `Lock contact` or `Unlock contact`.
+- **^K on the Contacts list locks the highlighted contact or unlocks it.** The padlock of
+  the row changes at once. On the handhelds, `Lock` is on Shift+F2.
+- **A locked sender has a padlock on its chip in a chat.** The chip reads `🔒 Name`
+  (`⚿ Name` on the PicoCalc), in the place where our own chip has its `★`.
+
+### Changed
+
+- **The selected message of a chat makes its chips white.** The text of the selected
+  message was already white. Now the mention chips in it, and the chip of its author, have
+  a white label too. Each chip keeps its fill, so you can still tell the nodes apart. A
+  mention of an unknown node is white on its grey fill.
+- In the archive preview, the footer says `Enter open` on a contact, because Enter opens
+  its node page.
+
+### Fixed
+
+- **A serial radio that stops when your laptop wakes from sleep opens the reconnect
+  dialog.** When a laptop wakes, the kernel can reset the USB device and close the open
+  port, but keep the same device file. MeshTerm still saw the port in the list of ports, so
+  it thought that the link was up. No reconnect dialog opened, and each command failed with
+  `no_event_received` (issue #32). Now the check also reads the connection flag of the
+  client, as the Bluetooth and TCP checks already did.
+- **The battery gauge of the Cardputer Zero stays on with the Cap.** On battery with the
+  Cap, most reads of the gauge failed, sometimes for almost two minutes. The gauge read
+  three times in 11 seconds and then waited 20 seconds, so it missed the good periods.
+  After seven failed reads, the gauge went away. Now MeshTerm tries again 5.5 seconds after
+  a failed read, and the last good reading stays for 10 minutes. A change between charging
+  and discharging must be read two times, because a bad read said "Charging" while the
+  battery discharged.
+
+## [0.11.3] - 2026-10-18
+
+**No log keeps a password or a secret, and a bug report can hide your home folder and the
+address of your radio.** Passwords, channel secrets, and pairing PINs went into the log and
+the run log as plain text, and this release removes them, also from the old records. The new
+**Anonymize** preference masks your personal details in the log and in the diagnostics. The
+demo mesh now looks more like a real one.
+
+### Added
+
+- **The Anonymize preference masks your personal details in the log and in the
+  diagnostics.** It is in the Diagnostics group of the Preferences page, and it is off by
+  default. When it is on, MeshTerm masks the account name in your home folder, the
+  Bluetooth address of your radio, IP addresses, and the name of a network companion. Each
+  masked value keeps a few characters, in the way that a card number prints as
+  `51xx xxxx xxxx 4571`: `C:\Users\j*********u`, `DA:xx:xx:xx:7C:7C`, `192.xxx.x.180`, and
+  `m******e.local`. Thus a maintainer can still tell two radios apart. The log masks each
+  line as MeshTerm writes it, and a change applies at once. A line that MeshTerm wrote
+  before you turned the preference on stays as it is.
+- **The diagnostics can be anonymized for one report.** `meshterm diagnostics --anonymize`
+  masks the report, and `--no-anonymize` shows it in full when the preference is on. On the
+  Diagnostics page, press `a` (Shift+F3 on the PicoCalc) to change between the two forms,
+  and `s` saves the form that you see. A new fact, `anonymized`, says which form a report
+  is.
+
+### Changed
+
+- **The demo mesh uses the regions of the real mesh.** The regions are `na`, `can`,
+  `onqc`, `qc`, and `yul`, each one inside the one before it. The `#montreal` channel sends
+  in `yul`. The invented regions are gone.
+- **In the demo, messages arrive as they do on a real mesh.** Most messages arrive two
+  times, through the two repeaters that our node hears, and most paths use three bytes for
+  each hop. A node that our node mentions in a channel answers a few seconds later. TX
+  optimize now has something to find: the power of a repeater changes how well the next
+  node hears it.
+
+### Fixed
+
+- **The log and the run log no longer keep passwords or secrets.** At the DEBUG level, the
+  log file showed the parameters of each command as you typed them, and the run log in the
+  database kept them at each level. Thus they held room and admin passwords, channel
+  secrets, channel links, and the pairing PIN of `config set device_pin`. Each chat run also
+  stored the secret of its channel. Now MeshTerm writes `<secret>` in the place of each
+  one, in the log file, on the console, and in the run log, always. The rule finds a secret
+  by its name, by its form (a remote `password` command, or `secret=` in a link), and by
+  its value, when MeshTerm has read or sent that secret before. The first start of this
+  version removes the secrets that earlier versions stored in the run log.
+- **The remote command line no longer stores a new password in its history.** The history
+  keeps `password` and `set guest.password` without the value, so ↑ still recalls the
+  start of the command.
+- An error about the device PIN no longer repeats the PIN that you typed.
+
+## [0.11.2] - 2026-10-16
+
+**In a chat, your messages show your name, MeshTerm has a demo mesh, and the colours are
+calmer.** Your messages and each mention of you are now easy to find in a chat.
+`meshterm --demo` runs a whole mesh over Montréal with no radio. The greys have no blue in
+them, the borders are grey, and the node marks are white.
+
+### Added
+
+- **`meshterm --demo` runs MeshTerm in a demo mesh over Montréal.** No radio is
+  necessary. The demo has approximately forty invented nodes: repeaters on the high points
+  of the city, room servers, sensors, and the people of the mesh. It has a week of traffic,
+  conversations on the channels, in a room, and in direct messages, and traces with their
+  records in the trophy case. Each run starts from the same state, in a directory of its
+  own, so your history never gets a node of the demo. The screenshots in the README and on
+  the website come from it.
+
+### Changed
+
+- **In a chat, your messages show your name.** A channel, a direct chat, and a room put
+  your messages under `★` and your node's name, and the Messages list shows them in the
+  same way. Your name is white, on the same colour of box that your key gives each chip,
+  where each other sender has the colour of its key as the text. A mention of your name
+  has the same white text, and the message that has it gets a white `★` at the left of
+  its time. Thus the messages that name you are easy to find down the left side of the
+  chat. Before, your messages showed only the `★`.
+- **Your node's star is white.** The `★` that marks your node on the map, in routes, in
+  lists, and in a chat is white, the same white as your name in the lists. Before, it was
+  yellow. A star in a faded part of a route stays grey.
+- **The greys are neutral, and the borders are grey.** Each grey of MeshTerm is now a
+  neutral grey, with no blue in it, at the same lightness as before. A plain border is
+  grey, where it was indigo. The amber and red borders of a caution keep their colours.
+- **Each node mark is white.** The marks of a companion, a repeater, a room server, and a
+  sensor (`●`, `▲`, `■`, `◉`) are white, because the shape already shows the type. Before,
+  they had four colours. The mark of an unknown node (`○`) stays grey.
+- A section heading has the colour of the title of its frame, and it has no icon.
+- **In a chat, a name that MeshTerm cannot match to a node is black on grey.** The box
+  around a sender or a mention with no known node has black text on a grey box. Thus it
+  does not stand out among the coloured names. Before, it was light blue on slate.
+- **A mention has no `@` in front of it.** The coloured box around the name already says
+  that it is a mention. On a terminal that cannot draw the boxes, a mention keeps its `@`.
+- **The line where you write a message shows each mention as a box.** When you type the
+  `]` of `@[Name]`, or reply to a message, the mention changes into the same coloured box
+  that the chat shows after you send it. The arrow keys move over the box in one step, and
+  one Backspace removes all of it. A reply now puts its mention where the cursor is, so you
+  can name more than one person in one message. The text that you type is white.
+- **On the uConsole and the Cardputer Zero, an imported seed stays a seed.** MeshTerm saves
+  a 32-byte seed in the node's `identity.key` as you give it. This is the same form that
+  the node uses when it makes its own key. A firmware companion still gets the full 64-byte
+  key, because it accepts only that form.
+- **A blank line comes before each section.** In each list that has sections (the main
+  menu, the Messages list, the Preferences page, Device config, and the others), the line
+  comes before each section heading. In a chat, it comes after the messages of each author
+  and before each new day. Thus the parts of a screen are easier to find, and a
+  conversation is easier to follow when many people write. By default, the line shows on a
+  terminal of 24 rows or more. A smaller terminal, and the 14 rows of the Cardputer Zero,
+  keep each row for content. The new **Section spacing** preference in the Display group
+  sets the smallest terminal that gets the line: any height, 20, 24, 30, or 40 rows, or
+  never.
+- The About page has a section on the Cardputer Zero. It says that MeshTerm runs on the
+  Cardputer Zero and on the Cardputer Zero Lite.
+
 ## [0.11.1] - 2026-10-13
 
 **Show private key shows the key again, and the uConsole and the Cardputer Zero can import
@@ -540,7 +738,11 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.5...HEAD
+[0.11.5]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.5
+[0.11.4]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.4
+[0.11.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.3
+[0.11.2]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.2
 [0.11.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.1
 [0.11.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.0
 [0.10.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.10.3

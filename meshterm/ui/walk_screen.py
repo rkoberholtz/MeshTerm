@@ -18,7 +18,7 @@ only its direct neighbours:
   **node-type mark** of the app, with its glyph and its colour: the same mark that the
   map and the route graph use for that node. The *identity* of the node is in the name
   next to the marker, in the hue of the node. Edges are braille lines. The median SNR of
-  the link sets the colour of an edge (green → amber → red, and slate for a link with no
+  the link sets the colour of an edge (green → amber → red, and grey for a link with no
   reading), and the age of the evidence makes it fainter. Each edge starts at the *right
   end of the focus name*, so that a line never crosses a label. The fan is on a grid of
   rows: one marker on each row, a blank row between two markers, and a blank row above
@@ -202,7 +202,7 @@ _SNR_STOPS: tuple[tuple[float, RGB], ...] = (
 
 #: The edge colour for a link with no SNR reading (for example, a link known only from a
 #: route).
-_NO_READING: RGB = (100, 116, 139)
+_NO_READING: RGB = (115, 115, 115)
 
 #: One-letter tags for the types of evidence for a link, the same as in the path composer:
 #: T(race), R(oute), P(acket log), N(eighbour table).
@@ -864,7 +864,7 @@ class WalkScreen(Screen):
         # The edge of the selected link is the brightest and is on top. It does not get
         # the age fade, so it shows as one lit line over the dimmer others. (The user can
         # still read the age in the age column of the row.) The edge of the collapsed
-        # marker is slate. But when the selection is one of its nodes, it becomes the
+        # marker is grey. But when the selection is one of its nodes, it becomes the
         # edge of that node.
         now = utcnow()
         for other, (x, y) in placed.items():
@@ -1387,9 +1387,8 @@ class WalkScreen(Screen):
         The walk once gave each marker the colour of its identity (the hue of the node,
         from its key), and only the glyph shape showed the type. Thus this canvas was
         different from each other place that shows a node with its type (the map, the
-        route graph, a contact row). There, the colour of the mark *is* the type, and the
-        ``type.*`` styles of the theme select it on purpose for each platform (a simple
-        downsample makes the violet of the repeater grey). The identity has its own lane
+        route graph, a contact row). There, the mark *is* the type, in the ``type.*`` styles
+        of the theme, which each platform resolves for itself. The identity has its own lane
         here, and always had it: the **name** next to the marker, in the hue of the key
         (:meth:`_label_rgb`). The shape and the colour now agree, and the legend under the
         canvas can explain both.
@@ -1416,7 +1415,7 @@ class WalkScreen(Screen):
         """The Rich style of the type glyph of a node in body text: the colour of its type.
 
         This is the text form of :meth:`_marker_rgb`: the same ``type.*`` entry (or the
-        yellow of the star). Thus the first glyph of the focus line, the glyphs of the list
+        white of our star). Thus the first glyph of the focus line, the glyphs of the list
         rows, and the canvas markers are one mark, drawn in three ways.
         """
         return self._glyph(node)[1]
@@ -1441,11 +1440,11 @@ class WalkScreen(Screen):
 
         These are the shared marks (:data:`~meshterm.ui.widgets.NODE_GLYPHS`) and the
         shared ``type.*`` colours for them. Thus a node shows here with exactly the glyph
-        and colour that the map, the route graph, and the contact list use for it: ``▲``
-        violet for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` pink for a
-        plain node, the yellow ``★`` for our node, and the grey ``○`` for a node that we
-        heard of but never identified. The colour and the shape say the same thing. Thus
-        the legend below the canvas is a real explanation, not a coincidence.
+        and colour that the map, the route graph, and the contact list use for it: a white
+        ``▲`` for a repeater, ``■`` for a room, ``◉`` for a sensor, ``●`` for a plain node,
+        ``★`` for our node, and the grey ``○`` for a node that we heard of but never
+        identified. Thus the legend below the canvas is a real explanation, not a
+        coincidence.
 
         Returns:
             ``(glyph, colour)``: the colour in the encoding that

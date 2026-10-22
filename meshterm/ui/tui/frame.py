@@ -206,7 +206,7 @@ def _panel_box(
         visible: The ANSI lines of the viewport, already sliced and padded to height.
         more_above: Whether content continues above the slice.
         more_below: Whether content continues below the slice.
-        border: The name of the border style (``"accent"`` for the focused screen).
+        border: The name of the border style (``"border"`` for the focused screen).
         caption: A short muted credit for the right end of the bottom rule (empty for none).
         flush: Remove the one-cell padding inside each side border, for a body that fills
             the frame (refer to :attr:`~meshterm.ui.tui.screen.Screen.flush`).
@@ -309,15 +309,17 @@ def _title_bar(
     memory of it, to learn something that the row can state directly. (When only one arrow
     showed, a blank cell stood in for the other.) Thus the pair is fixed at the left edge,
     where the eye starts, and **colour** gives the information. An arrow whose direction
-    has more content takes the ``accent`` of the border, so it looks like part of the
-    frame. An arrow with nothing in its direction becomes ``muted``. This is the same
+    has more content is lit as the title is (``title.border``). An arrow with nothing in
+    its direction becomes ``faint``. The live arrow once had the grey of the border. When
+    the border was #7c7c7c, that grey was almost the grey of ``faint``, and the two arrows
+    looked the same. A lit arrow is clear at each border grey. This is the same
     live/dim language that the F-key lane draws one row below (a dim chip keeps its label
     and loses its fill). The two are the only indicators of the platform.
 
     The title is centred in the rule between the arrows and the tail, exactly as the Rich
     ``Panel`` centres its own ``title``. (That panel is the frame with a border on the
     desktop, which this bar replaces.) The rule itself takes ``border_style``
-    (``"accent"``) directly: the same bold weight that a real border has. It does not take
+    (``"border"``) directly: the same style that a real border has. It does not take
     the muted variant of :func:`~meshterm.ui.theme.hint_style`, which is for secondary text
     next to a border (the Esc atom below, a footer hint on the other platform).
 
@@ -350,7 +352,7 @@ def _title_bar(
         status: The atoms of the header, for a platform without a header row. ``None`` (or
             empty: nothing unread, no pack) draws the bar exactly as it is with a header.
     """
-    border = "accent"
+    border = "border"
     head_span = 3  # the arrow pair, plus the space between it and the rule
     status = status if status is not None and status.cell_len else None
     stat_span = status.cell_len + 1 if status else 0  # the space before the status
@@ -371,8 +373,9 @@ def _title_bar(
         label_w = heading.cell_len + 2
 
     bar = Text()
-    bar.append("↑", style=border if more_above else "muted")
-    bar.append("↓", style=border if more_below else "muted")
+    lit = title_style(border)
+    bar.append("↑", style=lit if more_above else "faint")
+    bar.append("↓", style=lit if more_below else "faint")
     bar.append(" ")
     if title:
         left = max(1, (rule_span - label_w) // 2)
@@ -453,6 +456,7 @@ def compose_base(
         # (refer to :class:`~meshterm.ui.tui.screen.ListWindow`) can size its chrome to the
         # frame into which it will be sliced.
         base.note_viewport(viewport)
+        base.note_terminal_rows(rows)
         body_lines = base.render_body(cols - panel_inset(base.flush))
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
         # The panel wrap is a pure function of what is between its borders. Thus cache it,
@@ -472,7 +476,7 @@ def compose_base(
         if footer_lane is None and _BASE_BOX_CACHE is not None and _BASE_BOX_CACHE[0] == key:
             body = _BASE_BOX_CACHE[1]
         else:
-            panel = _panel_box(title, visible, more_above, more_below, "accent", caption, flush)
+            panel = _panel_box(title, visible, more_above, more_below, "border", caption, flush)
             body = render_lines(Group(panel, footer_row()), cols)
             if footer_lane is None:
                 _BASE_BOX_CACHE = (key, body)
@@ -481,6 +485,7 @@ def compose_base(
         # the Panel. The body gets the full terminal width and one more row.
         viewport = max(1, rows - header_h - 1 - 1)  # minus footer(1) and title bar(1)
         base.note_viewport(viewport)
+        base.note_terminal_rows(rows)
         body_lines = base.render_body(cols)
         visible, more_above, more_below = _visible_slice(base, body_lines, viewport)
         status = None if platform.header_row else header
@@ -612,6 +617,27 @@ def fit_hint(hint: str, width: int, *, shed_first: Sequence[str] = ()) -> str:
     return crop_cells(Text(fitted), 0, max(1, width - 1)).plain + "…"
 
 
+def fitted_footer(screen: Screen, width: int) -> str:
+    """The footer hint of ``screen`` as the hint line draws it: fitted to ``width`` cells.
+
+    A hint that fits is returned as it is. A wider hint loses atoms through
+    :func:`fit_hint`, and keeps its Esc atom. Before, the hint line cut a wide hint at the
+    edge, and the cut took the Esc atom first. The width is measured on the plain text,
+    because a hint can carry markup (the ``[warn]offline[/warn]`` of the map).
+
+    Args:
+        screen: The screen whose hint the footer draws: the top screen, also when it floats.
+        width: The cells of the hint line.
+
+    Returns:
+        The hint to draw.
+    """
+    hint = screen.footer_hint
+    if cell_len(Text.from_markup(hint).plain) <= width:
+        return hint
+    return fit_hint(hint, width, shed_first=getattr(screen, "spare_hint_atoms", ()))
+
+
 def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     """Compose a chromeless splash: a centred wordmark above a panel of content size.
 
@@ -642,6 +668,7 @@ def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     # measure). It is never wider than the terminal, and never narrower than the title or the
     # hint that it must show.
     probe = max(10, min(cols - 6, 100))
+    screen.note_terminal_rows(rows)
     probe_lines = screen.render_body(probe)
     measured = max((_ansi_width(line) for line in probe_lines), default=10)
     # Size to the widest footer possible, not to the footer of this frame. A screen whose
@@ -695,16 +722,16 @@ def compose_startup(screen: Screen, cols: int, rows: int) -> str:
     visible, more_above, more_below = _visible_slice(screen, body_lines, viewport)
 
     body = Text.from_ansi("\n".join(visible))
-    hint = hint_style("accent")
+    hint = hint_style("border")
     subtitle = f"[{hint}]{hint_text}[/]"
     if more_above or more_below:
         arrow = ("↑" if more_above else " ") + ("↓" if more_below else " ")
         subtitle = f"[{hint}]{arrow} · {fit_hint(hint_text, inner_w - 5)}[/]"
     panel = Panel(
         body,
-        title=f"[{title_style('accent')}]{screen.title}[/]" if screen.title else None,
+        title=f"[{title_style('border')}]{screen.title}[/]" if screen.title else None,
         subtitle=subtitle,
-        border_style="accent",
+        border_style="border",
         padding=(vpad, 1),
         width=inner_w + 4,
     )
@@ -752,6 +779,7 @@ def compose_bare(screen: Screen, cols: int, rows: int) -> str:
     # share screen fits its code to the rows). Thus the height is recorded before the body
     # is requested, not after, as the composers with a frame also do.
     screen.note_viewport(rows)
+    screen.note_terminal_rows(rows)
     body_lines = screen.render_body(cols)
     while body_lines and not _ansi_width(body_lines[-1]):
         body_lines.pop()  # a trailing blank row pushes the block off its anchor
@@ -780,6 +808,7 @@ def _dialog_layout(screen: Screen, cols: int, rows: int) -> tuple[int, int, int,
     # with a list window (the path composer) can size to what it can use. After that, the
     # slice records the real viewport, sized to the body.
     screen.note_viewport(budget)
+    screen.note_terminal_rows(rows)
     body_lines = screen.render_body(max_w - 4)
     # A grow-only screen (the packet viewer, when it pages between packets) sizes to the
     # tallest body that it has shown, not to this body. Thus a shorter body keeps the larger
@@ -865,7 +894,7 @@ def compose_dialog(screen: Screen, cols: int, rows: int) -> str:
     """
     max_w, vpad, viewport, body_lines = _dialog_layout(screen, cols, rows)
     visible, more_above, more_below = _visible_slice(screen, body_lines, viewport)
-    border = getattr(screen, "border_style", "accent")
+    border = getattr(screen, "border_style", "border")
     # The resolved hint, not the hint of the screen: it is what the border draws. It changes
     # with the lane below, and also with the hint of the screen (refer to _dialog_hint).
     hint = _dialog_hint(screen)
